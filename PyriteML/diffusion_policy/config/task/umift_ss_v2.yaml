@@ -6,6 +6,8 @@
 #   umift_ss_v2_abs_obs.yaml         obs poses absolute instead of relative
 #   umift_ss_v2_abs_obs_action.yaml  obs AND actions absolute (fixture frame)
 #   umift_ss_v2_no_scan.yaml         no scan_heatmap input (collect without laser pauses)
+#   umift_ss_v2_elapsed_time.yaml    + elapsed_time_0 (seconds since policy start)
+#   umift_ss_v2_no_scan_elapsed_time.yaml  both of the above
 # Everything is driven by shape_meta, so it travels with the checkpoint.
 name: UMIFT-SS-V2
 

@@ -23,6 +23,7 @@ from PyriteConfig.tasks.umift.workcell_frames import (
 )
 from PyriteUtility.common import GracefulKiller
 from PyriteUtility.planning_control.mpc import ModelPredictiveController
+from PyriteUtility.planning_control.policy_clock import PolicyElapsedClock
 from PyriteUtility.planning_control.scan_encoder_monitor import (
     ScanEncoderMonitor,
     render_scan_panel,
@@ -977,6 +978,19 @@ def main():
     periodic_scan_enabled = (
         bool(control_para.get("periodic_scan_enabled", False)) and policy_uses_scan
     )
+    # Policies with an elapsed_time_0 input were trained on demo-time seconds since the
+    # policy start. The clock rescales wall time by slow_down_factor and adds scan
+    # pauses back unscaled (see PolicyElapsedClock).
+    has_elapsed_time = "elapsed_time_0" in shape_meta["sample"]["obs"]["sparse"]
+    elapsed_clock = PolicyElapsedClock(control_para["slow_down_factor"])
+    if has_elapsed_time:
+        assert (
+            shape_meta["sample"]["obs"]["sparse"]["elapsed_time_0"]["horizon"] == 1
+        ), "elapsed_time_0 must have horizon 1"
+        print(
+            "[elapsed-time] policy takes elapsed_time_0; demo-time scale = 1/"
+            f"{control_para['slow_down_factor']}"
+        )
     if control_para.get("periodic_scan_enabled", False) and not policy_uses_scan:
         print(
             "[layup] periodic scans off: this checkpoint has no scan_heatmap input"
@@ -1194,6 +1208,7 @@ def main():
             )
 
         episode_initial_time_s = env.current_hardware_time_s
+        elapsed_clock.start(episode_initial_time_s)
         last_scan_time_s = -float("inf")
         killer = GracefulKiller()
         while not killer.kill_now:
@@ -1233,7 +1248,10 @@ def main():
                 # the horizon clock (used below for execution-duration sleep
                 # math) and the periodic-scan clock (measured from when this
                 # scan actually finished, not when it was due).
-                horizon_initial_time_s = env.current_hardware_time_s
+                scan_end_time_s = env.current_hardware_time_s
+                # The demo clock kept running during scan pauses in the training data.
+                elapsed_clock.add_pause(scan_end_time_s - horizon_initial_time_s)
+                horizon_initial_time_s = scan_end_time_s
                 last_scan_time_s = horizon_initial_time_s
 
             obs_raw = env.get_observation_from_buffer()
@@ -1281,6 +1299,13 @@ def main():
             # import pdb; pdb.set_trace()
 
             raw_to_obs_inference(obs_raw, obs_task, shape_meta)
+
+            if has_elapsed_time:
+                elapsed_s = elapsed_clock.elapsed_s(horizon_initial_time_s)
+                obs_task["obs"]["elapsed_time_0"] = np.array(
+                    [[elapsed_s]], dtype=np.float32
+                )
+                printOrNot(vbs_h2, f"elapsed_time_0 = {elapsed_s:.2f}s (demo time)")
 
             # hacks for UMIFT
             for id in id_list:

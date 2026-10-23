@@ -397,6 +397,8 @@ class UmiFTDataset(BaseImageDataset):
                         this_normalizer = get_identity_normalizer_from_stat(stat)
                 elif "gripper" in key:
                     this_normalizer = get_range_normalizer_from_stat(stat)
+                elif "elapsed_time" in key:
+                    this_normalizer = get_range_normalizer_from_stat(stat)
                 else:
                     raise RuntimeError("unsupported")
                 sparse_normalizer[key] = this_normalizer
