@@ -1,0 +1,33 @@
+# Adds elapsed_time_0: seconds since the policy started, as a 1-D low-dim input.
+#
+# Training: query time minus (first timestamp + elapsed_time_start_pad_s), floored at 0.
+# The converters prepend 5 s of frozen start state (combine_umift_dataset.sh
+# --start-pad-seconds, default 5), and the policy starts where the real recording starts,
+# so keep this equal to the pad your dataset was built with (0 if it has none).
+#
+# Inference: the runner supplies the same quantity in demonstration time, i.e. wall time
+# divided by control_para["slow_down_factor"] (see PolicyElapsedClock). Without that
+# division a 2x slowdown would show the policy twice the elapsed time it saw in training.
+#
+#   task=umift_ss_v2_elapsed_time
+#   task=umift_ss_v2_no_scan_elapsed_time   (also drops the scan input)
+defaults:
+  - umift_ss_v2
+  - _self_
+
+name: UMIFT-SS-V2-ELAPSED-TIME
+
+elapsed_time_start_pad_s: 5.0
+
+shape_meta:
+  obs:
+    elapsed_time_0:
+      shape: [1]
+      type: low_dim
+      start_pad_s: ${task.elapsed_time_start_pad_s}
+  sample:
+    obs:
+      sparse:
+        elapsed_time_0:
+          horizon: 1
+          down_sample_steps: 1
