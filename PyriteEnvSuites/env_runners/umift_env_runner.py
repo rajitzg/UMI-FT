@@ -23,7 +23,10 @@ from PyriteConfig.tasks.umift.workcell_frames import (
 )
 from PyriteUtility.common import GracefulKiller
 from PyriteUtility.planning_control.mpc import ModelPredictiveController
-from PyriteUtility.planning_control.policy_clock import PolicyElapsedClock
+from PyriteUtility.planning_control.policy_clock import (
+    PolicyElapsedClock,
+    scale_obs_windows_by_slow_down,
+)
 from PyriteUtility.planning_control.scan_encoder_monitor import (
     ScanEncoderMonitor,
     render_scan_panel,
@@ -659,6 +662,11 @@ def main():
         # Training policy rate = 10 Hz; iPhone/GoPro legacy path uses 0.0167 (~60 Hz).
         "raw_time_step_s": 1.0 / 15.0,
         "slow_down_factor": 2,  # slow down policy execution by this factor
+        # Stretch every obs history window (rgb/depth/pose/wrench strides) by
+        # slow_down_factor so the policy sees the same DEMO-time history span it was
+        # trained on. False reproduces the old behavior (windows span the training
+        # wall-clock time, so motion inside them looks slow_down_factor x slower).
+        "scale_obs_windows_by_slow_down": True,
         # Must be <= the loaded checkpoint's sparse_action_horizon (epoch=0170 is 12;
         # new 10 Hz yaml uses 32). With ensemble on, smaller => more overlap.
         "sparse_execution_horizon": 16, # first step is at t=0, so this should be >1
@@ -819,6 +827,17 @@ def main():
     # Both rgb and ultrawide stream at 60Hz, so we'll just use either one. rgb, if it exists.
     rgb_key = next(k for k in vision_key if k in ["rgb_0", "ultrawide_0"])
 
+    # Obs history windows are in demo time; the robot runs slow_down_factor x slower.
+    if control_para["scale_obs_windows_by_slow_down"]:
+        OmegaConf.set_struct(shape_meta["sample"]["obs"]["sparse"], False)
+        for key, (old_ds, new_ds) in scale_obs_windows_by_slow_down(
+            shape_meta["sample"]["obs"]["sparse"], control_para["slow_down_factor"]
+        ).items():
+            print(
+                f"[slow_down] {key} down_sample_steps: {old_ds} -> {new_ds} "
+                f"(x{control_para['slow_down_factor']})"
+            )
+
     # ultrawide also streams at 60Hz so no mapping is needed during inference. Just use the same downsampling and horizon.
     rgb_query_size = (
         shape_meta["sample"]["obs"]["sparse"][rgb_key]["horizon"] - 1
@@ -921,6 +940,23 @@ def main():
     query_sizes = {
         "sparse": query_sizes_sparse,
     }
+
+    # The ManipServer ring buffers must hold the (possibly slow-down-stretched) windows.
+    with open(pipeline_para["hardware_config_path"]) as _f:
+        _hw = yaml.safe_load(_f)
+    for _name, _buf_key in (
+        ("ts_pose_fb", "robot_buffer_size"),
+        ("wrench", "wrench_buffer_size"),
+        ("rgb", "rgb_buffer_size"),
+    ):
+        _need = query_sizes_sparse.get(_name)
+        _have = _hw.get(_buf_key)
+        if _need and _have and _need > _have:
+            raise ValueError(
+                f"Obs window for '{_name}' needs {_need} samples but "
+                f"{_buf_key}={_have} in {pipeline_para['hardware_config_path']}. "
+                "Raise the buffer, or set control_para['scale_obs_windows_by_slow_down']=False."
+            )
 
     if (
         control_para["test_nominal_target"]
