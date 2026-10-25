@@ -47,3 +47,29 @@ class PolicyElapsedClock:
         wall = float(now_s) - self._start_s
         moving = max(0.0, wall - self._paused_s)
         return moving / self.slow_down_factor + self._paused_s
+
+
+def scale_obs_windows_by_slow_down(sparse_obs_meta, slow_down_factor: float) -> dict:
+    """Stretch every observation history window by ``slow_down_factor``.
+
+    ``shape_meta.sample.obs.sparse.<key>`` = {horizon, down_sample_steps}: a window is
+    ``horizon`` samples spaced ``down_sample_steps`` apart, i.e. a span of demo time.
+    At inference the robot moves ``slow_down_factor`` times slower in wall time (action
+    steps are spaced ``raw_time_step_s * slow_down_factor`` apart), so the same *demo-time*
+    window needs ``slow_down_factor`` times more wall-clock samples. Without this the
+    policy sees its own history in slow motion.
+
+    Only keys with ``horizon > 1`` are touched (``elapsed_time_0``, scan heatmaps have
+    horizon 1). Call this BEFORE the per-sensor rate corrections (those multiply ``ds``
+    again). Mutates ``sparse_obs_meta`` in place; returns {key: (old_ds, new_ds)}.
+    """
+    changes = {}
+    for key in list(sparse_obs_meta.keys()):
+        attr = sparse_obs_meta[key]
+        if int(attr["horizon"]) <= 1:
+            continue
+        old = int(attr["down_sample_steps"])
+        new = max(1, int(round(old * float(slow_down_factor))))
+        attr["down_sample_steps"] = new
+        changes[key] = (old, new)
+    return changes

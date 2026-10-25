@@ -81,3 +81,26 @@ def test_wrench_key_mapping_logic():
     right = wrench_12[:, 6:12]
     assert np.allclose(left, [0, 1, 2, 3, 4, 5])
     assert np.allclose(right, [6, 7, 8, 9, 10, 11])
+
+
+def test_layup_raw_to_input_is_letterboxed_like_training():
+    """Live 640x480 frames must be padded to square (black bars), not center-cropped."""
+    from PyriteUtility.computer_vision.computer_vision_utility import (
+        get_image_transform_with_border,
+    )
+
+    frame = np.full((480, 640, 3), 200, dtype=np.uint8)
+    out = get_image_transform_with_border((640, 480), (224, 224))(frame)
+    assert out.shape == (224, 224, 3)
+    bar = (224 - 168) // 2  # 4:3 content in a square -> 28 rows of black top/bottom
+    assert out[:bar].max() == 0 and out[-bar:].max() == 0
+    assert out[bar + 2 : -bar - 2].min() > 190
+
+
+def test_layup_env_uses_letterbox_transform():
+    import inspect
+
+    from PyriteEnvSuites.envs.task import manip_server_layup_env as m
+
+    src = inspect.getsource(m.ManipServerLayupEnv.__init__)
+    assert "get_image_transform_with_border" in src

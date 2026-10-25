@@ -15,7 +15,10 @@ from typing import Callable, Deque, Dict, List, Optional, Tuple, Any
 import cv2
 import numpy as np
 
-from PyriteUtility.computer_vision.computer_vision_utility import get_image_transform
+from PyriteUtility.computer_vision.computer_vision_utility import (
+    get_image_transform,
+    get_image_transform_with_border,
+)
 from PyriteEnvSuites.envs.task.manip_server_env import ManipServerEnv, input_res
 
 try:
@@ -318,7 +321,11 @@ class ManipServerLayupEnv(ManipServerEnv):
 
         self._vision_buffer: Optional[D405VisionRingBuffer] = None
         if self._use_pyrealsense_vision:
-            raw_to_input = get_image_transform(
+            # Training frames were letterboxed (pad 640x480 to square, then INTER_AREA
+            # to 224; UMIFT_Data/umift/processing/umift_image_prep.py). Do the same
+            # here -- get_image_transform (resize + center crop) narrows the FoV and
+            # enlarges the tool vs. what the policy was trained on.
+            raw_to_input = get_image_transform_with_border(
                 input_res=(640, 480),
                 output_res=input_res,
                 bgr_to_rgb=False,
