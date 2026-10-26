@@ -36,6 +36,10 @@ from PyriteUtility.spatial_math import spatial_utilities as su
 from PyriteEnvSuites.envs.task.manip_server_layup_env import ManipServerLayupEnv
 # from PyriteEnvSuites.envs.task.manip_server_umift_env import ManipServerUMIFTEnv
 from PyriteEnvSuites.envs.task.run_layup_scan_periodic import run_layup_scan_periodic
+from PyriteEnvSuites.env_runners.rollout_cam_recorder import (
+    DEFAULT_ORBBEC_V4L,
+    RolloutCamRecorder,
+)
 
 from PyriteEnvSuites.utils.env_utils import (
     pose9g1_to_traj,
@@ -678,6 +682,9 @@ def main():
         "fix_orientation": False,
         "enable_control_log": True,
         "log_policy_vision": True,
+        # Per-rollout MP4s under <control log>/cameras: wrist D405 + center Orbbec.
+        "record_rollout_cameras": True,
+        "orbbec_v4l_device": DEFAULT_ORBBEC_V4L,
         "pausing_mode": False,  # matplotlib debug only; independent of logging
         "device": "cuda",
         # Post-episode Keyence layup scan eval (menu option "e")
@@ -1156,12 +1163,29 @@ def main():
 
         log = None
         horizon_count = 0
+        episode_log_path = os.path.join(
+            control_log_folder_path, f"episode_{int(time.time())}"
+        )
+        cam_rec: Optional[RolloutCamRecorder] = None
+        if control_para.get("record_rollout_cameras", False) and isinstance(
+            env, ManipServerLayupEnv
+        ):
+            try:
+                cam_rec = RolloutCamRecorder(
+                    Path(episode_log_path) / "cameras",
+                    orbbec_v4l=str(
+                        control_para.get("orbbec_v4l_device", DEFAULT_ORBBEC_V4L)
+                    ),
+                )
+                cam_rec.start()
+                env.set_wrist_raw_rgb_sink(cam_rec.push_wrist_rgb)
+                printOrNot(vbs_h1, "Rollout cameras ->", cam_rec.out_dir)
+            except Exception as exc:
+                print(f"[rollout-cam] start failed (continuing without): {exc}")
+                cam_rec = None
         if scan_monitor is not None:
             scan_monitor.reset()
         if control_para["enable_control_log"]:
-            episode_log_path = os.path.join(
-                control_log_folder_path, f"episode_{int(time.time())}"
-            )
             log_store = zarr.DirectoryStore(path=episode_log_path)
             log = zarr.open(store=log_store, mode="w")
             log.attrs["sparse_execution_horizon"] = int(
@@ -1675,6 +1699,19 @@ def main():
         episode_id += 1
 
         env.stop_saving_data()
+
+        if cam_rec is not None:
+            try:
+                env.set_wrist_raw_rgb_sink(None)
+                cam_info = cam_rec.stop()
+                print(
+                    f"[rollout-cam] saved wrist_frames={cam_info['wrist_frames']} "
+                    f"orbbec_frames={cam_info['orbbec_frames']} "
+                    f"dir={cam_rec.out_dir}"
+                )
+            except Exception as exc:
+                print(f"[rollout-cam] stop failed: {exc}")
+            cam_rec = None
 
         print("Options:")
         print("     c: continue to next episode.")

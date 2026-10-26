@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Callable, Deque, Dict, List, Optional, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Tuple, Any
 
 import cv2
 import numpy as np
@@ -138,6 +138,8 @@ class D405VisionRingBuffer:
         self._depth_scale = 0.001
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        # Optional sink for raw 640x480 RGB (rollout MP4); must be cheap/non-blocking.
+        self._raw_rgb_sink: Optional[Callable[[np.ndarray], Any]] = None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -196,6 +198,12 @@ class D405VisionRingBuffer:
                     color_frame = frames.get_color_frame()
                     if color_frame:
                         color_raw = np.asarray(color_frame.get_data())
+                        sink = self._raw_rgb_sink
+                        if sink is not None:
+                            try:
+                                sink(color_raw)
+                            except Exception:
+                                pass
                         color_policy = convert_color_frame_to_policy(
                             color_raw,
                             self.raw_to_input_transform,
@@ -466,6 +474,13 @@ class ManipServerLayupEnv(ManipServerEnv):
     def stop_saving_data(self) -> None:
         self.server.stop_saving_data()
         self.server.stop_listening_key_events()
+
+    def set_wrist_raw_rgb_sink(
+        self, sink: Optional[Callable[[np.ndarray], Any]]
+    ) -> None:
+        """Hook D405 raw RGB frames (HxWx3 RGB) for rollout video recording."""
+        if self._vision_buffer is not None:
+            self._vision_buffer._raw_rgb_sink = sink
 
     def get_episode_folder(self) -> str:
         return self.server.get_episode_folder()
