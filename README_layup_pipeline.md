@@ -129,6 +129,13 @@ Inference diagnostics (`umift_env_runner.py`, `control_para`): `show_scan_panel`
 | Drop scan-pause windows from training targets | `UMI-FT/PyriteML/diffusion_policy/common/sampler_umift.py` |
 | Train | `UMI-FT/PyriteML/train.py` (`train_umift_workspace`) |
 | Inference | `UMI-FT/PyriteEnvSuites/env_runners/umift_env_runner.py` |
+| Review / flag / export episodes (browser) | `UMI-FT/UMIFT_Data/review/review_server.py` (see `UMIFT_Data/review/README.md`) |
+
+## Reviewing episodes
+
+To browse base and DAgger episodes with synced wrist video, pose/force plots and the checkpoint's observation window, run
+`python UMIFT_Data/review/review_server.py --ckpt <ckpt>` and open `http://127.0.0.1:8770`. Flag episodes keep/reject, then
+export the kept ones to a new `acp_replay_buffer.zarr` with `source` tags. See `UMIFT_Data/review/README.md`.
 
 ## View as LeRobot
 
