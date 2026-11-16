@@ -50,7 +50,7 @@ function interp(tSrc, ySrc, tDst) {
   return out;
 }
 
-export function createPath3d(container, arrays, header) {
+export function createPath3d(container, arrays, header, mold = null) {
   container.innerHTML = "";
   const n = arrays.pose_t.length;
   const tArr = arrays.pose_t;
@@ -130,6 +130,24 @@ export function createPath3d(container, arrays, header) {
   grid.material.transparent = true; grid.material.opacity = 0.25;
   scene.add(grid);
 
+  // Stringer mesh (fixture frame, same as the poses). Transparent and not writing
+  // depth, so a path pressed into the surface stays visible.
+  let moldMesh = null;
+  if (mold) {
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute("position", new THREE.BufferAttribute(mold.vertices, 3));
+    mg.setIndex(new THREE.BufferAttribute(mold.faces, 1));
+    mg.computeVertexNormals();
+    moldMesh = new THREE.Mesh(mg, new THREE.MeshLambertMaterial({
+      color: 0x8a8f99, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+    moldMesh.renderOrder = -1;
+    scene.add(moldMesh);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(0.3, -1, 0.6); // from above (+Y is down), operator side
+    scene.add(sun);
+  }
+
   controls.target.copy(c);
   camera.position.set(c.x, c.y - r * 0.8, c.z + r * 2.6); // operator side (+Z), slightly above
   controls.update();
@@ -177,6 +195,7 @@ export function createPath3d(container, arrays, header) {
       const i0 = lowerBound(tArr, a), i1 = Math.max(i0 + 1, lowerBound(tArr, b));
       range = [i0, Math.min(n, i1)]; linesDirty = true;
     },
+    setShowMold(show) { if (moldMesh) { moldMesh.visible = show; dirty = true; } },
     setShowVt(show) { vtLine.visible = show && hasVt; linesDirty = true; },
     setCursor(t, histFrom) {
       const i = Math.min(n - 1, lowerBound(tArr, t));
@@ -189,6 +208,6 @@ export function createPath3d(container, arrays, header) {
       dirty = true;
     },
     setColorBy,
-    destroy() { alive = false; ro.disconnect(); controls.dispose(); renderer.dispose(); geom.dispose(); pathLine.geometry.dispose(); vtLine.geometry.dispose(); pathMat.dispose(); vtMat.dispose(); container.innerHTML = ""; },
+    destroy() { alive = false; ro.disconnect(); controls.dispose(); renderer.dispose(); geom.dispose(); pathLine.geometry.dispose(); vtLine.geometry.dispose(); pathMat.dispose(); vtMat.dispose(); if (moldMesh) { moldMesh.geometry.dispose(); moldMesh.material.dispose(); } container.innerHTML = ""; },
   };
 }

@@ -8,7 +8,7 @@ const S = {
   episodes: [], meta: null, filter: "all", cur: null, ep: null, token: 0, loading: null, flagging: false,
   frame: 0, t: 0, playing: false, dirty: true,
   seeking: false, pendingSeek: null,
-  showHist: true, histMode: "training", showUnsampled: true, colorBy: "time", showVt: false,
+  showHist: true, histMode: "training", showUnsampled: true, colorBy: "time", showVt: false, showMold: true, mold: null,
   range3d: [0, 1], sprite: null, plots: null, path: null, moreOpen: false,
 };
 
@@ -106,14 +106,15 @@ async function openEpisode(key) {
   S.plots.setHistory(S.showHist && S.meta.has_ckpt, S.histMode);
   S.plots.setUnsampled(S.showUnsampled);
   try {
-    S.path = createPath3d($("path3d"), ep.arrays, ep.header);
+    S.path = createPath3d($("path3d"), ep.arrays, ep.header, S.mold);
     S.path.setColorBy(S.colorBy);
     S.path.setShowVt(S.showVt);
+    S.path.setShowMold(S.showMold);
   } catch (err) {  // no WebGL (e.g. X forwarding): keep everything else working
     console.warn("3D view disabled:", err);
     $("path3d").innerHTML = `<p class="muted" style="padding:10px">3D view unavailable (WebGL: ${err.message})</p>`;
     const noop = () => {};
-    S.path = { setRange: noop, setCursor: noop, setColorBy: noop, setShowVt: noop, destroy: () => { $("path3d").innerHTML = ""; } };
+    S.path = { setRange: noop, setCursor: noop, setColorBy: noop, setShowVt: noop, setShowMold: noop, destroy: () => { $("path3d").innerHTML = ""; } };
   }
 
   const n = ep.arrays.rgb_t.length;
@@ -337,6 +338,7 @@ function wire() {
   for (const id of ["r3dStart", "r3dEnd"]) $(id).addEventListener("input", applyRange3d);
   $("r3dReset").onclick = () => { $("r3dStart").value = 0; $("r3dEnd").value = 1000; applyRange3d(); };
   $("lockRange").onchange = () => { if ($("lockRange").checked) S.plots.setXRange(...S.range3d); else S.plots.resetX(); };
+  $("showMold").onchange = e => { S.showMold = e.target.checked; S.path.setShowMold(S.showMold); };
   $("showVt").onchange = e => { S.showVt = e.target.checked; S.path.setShowVt(S.showVt); S.plots.setVt(S.showVt); };
   $("colorBy").onchange = e => { S.colorBy = e.target.value; S.path.setColorBy(S.colorBy); };
   $("showHist").onchange = e => { S.showHist = e.target.checked; S.plots.setHistory(S.showHist, S.histMode); S.dirty = true; };
@@ -402,6 +404,10 @@ async function init() {
        <span class="muted">(ckpt: ${S.meta.ckpt.split("/").slice(-3).join("/")})</span>`
     : `<i style="background:rgba(0,0,0,.08)"></i>start pad <i style="background:rgba(148,103,189,.3)"></i>scan gap <i style="background:#f0f"></i>pose jump
        <span class="muted">(run with --ckpt for history windows)</span>`;
+  if (S.meta.has_mold) {
+    const { arrays } = decodePayload(await (await fetch("/api/mold")).arrayBuffer());
+    S.mold = { vertices: arrays.vertices, faces: Uint32Array.from(arrays.faces) };
+  } else $("moldToggle").style.display = "none";
   wire();
   renderList();
   const want = decodeURIComponent(location.hash.slice(1));

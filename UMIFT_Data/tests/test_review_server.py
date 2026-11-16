@@ -15,7 +15,7 @@ def server(tmp_path):
     b = write_synthetic_episode_zarr(tmp_path / "stringer_v3.5_base" / "acp_replay_buffer.zarr", n_eps=2)
     d = write_synthetic_episode_zarr(tmp_path / "stringer_v3.5_dagger" / "acp_replay_buffer.zarr", n_eps=2)
     args = review_server.parse_args([
-        "--base", str(b), "--dagger", str(d), "--port", "0",
+        "--base", str(b), "--dagger", str(d), "--port", "0", "--mold", "none",
         "--flags", str(tmp_path / "flags.json"), "--cache-dir", str(tmp_path / "cache")])
     srv = review_server.make_server(args)
     th = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -167,3 +167,32 @@ def test_malformed_range_is_not_500(server):
     url, _ = server
     st, h, body = _get(url + "/api/episode/base/0/video.mp4", {"Range": "bytes=-"})
     assert st == 200
+
+
+def test_mold_404_without_mold(server):
+    url, _ = server
+    _, _, body = _get(url + "/api/episodes")
+    assert json.loads(body)["has_mold"] is False
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(url + "/api/mold")
+    assert e.value.code == 404
+
+
+def test_mold_endpoint(tmp_path):
+    from test_review_mold import _write_field
+    b = write_synthetic_episode_zarr(tmp_path / "stringer_v3.5_base" / "acp_replay_buffer.zarr", n_eps=1)
+    _write_field(tmp_path / "fixb_field.npz")
+    args = review_server.parse_args(["--base", str(b), "--dagger", "--port", "0", "--mold", str(tmp_path / "fixb_field.npz"),
+                                     "--flags", str(tmp_path / "f.json"), "--cache-dir", str(tmp_path / "cache")])
+    srv = review_server.make_server(args)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        assert json.loads(_get(url + "/api/episodes")[2])["has_mold"] is True
+        header, arrays = _decode(_get(url + "/api/mold")[2])
+        assert len(arrays["vertices"]) % 3 == 0 and len(arrays["faces"]) % 3 == 0
+        assert arrays["faces"].max() < len(arrays["vertices"]) // 3
+        assert header["n_faces"] == len(arrays["faces"]) // 3
+    finally:
+        srv.shutdown()
+        srv.server_close()

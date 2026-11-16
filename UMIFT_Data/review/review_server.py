@@ -28,6 +28,8 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE.parent) not in sys.path:
     sys.path.insert(0, str(_HERE.parent))
 
+import numpy as np  # noqa: E402
+
 from review import video  # noqa: E402
 from review.episodes import DatasetIndex, EpisodeRef, append_arrays, build_payload, encode_payload  # noqa: E402
 from review.flags import FlagStore  # noqa: E402
@@ -49,9 +51,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="runner slow_down_factor for the rollout history view")
     p.add_argument("--session", default="stringer_v3.5")
     p.add_argument("--flags", default=None, help=f"default {DATA_ROOT}/review_flags/<session>.json")
+    p.add_argument("--mold", default=None,
+                   help="fixb_field.npz stringer mesh for the 3D overlay (fixture frame); "
+                        "default: the stringer_v3.5_fixb field if present; 'none' disables")
     p.add_argument("--port", type=int, default=8770)
     p.add_argument("--cache-dir", default=str(Path.home() / ".cache" / "umift_review"))
     a = p.parse_args(argv)
+    if a.mold is None:
+        from review.mold import DEFAULT_FIELD
+        a.mold = DEFAULT_FIELD if Path(DEFAULT_FIELD).exists() else "none"
     if a.flags is None:
         a.flags = f"{DATA_ROOT}/review_flags/{a.session}.json"
     return a
@@ -78,6 +86,14 @@ class ReviewState:
         self._pool = ThreadPoolExecutor(max_workers=2)
         self.export_lock = threading.Lock()
         self._summaries = {e.key: self.index.summary(e) for e in self.index.episodes}
+        self.mold_bytes = None
+        if args.mold and args.mold != "none":
+            from review.mold import load_mold
+            v, f = load_mold(args.mold, self.cache_dir)
+            self.mold_bytes = encode_payload(
+                {"arrays": [{"name": "vertices", "length": int(v.size)}, {"name": "faces", "length": int(f.size)}],
+                 "n_faces": int(len(f)), "source": str(args.mold)},
+                [v.ravel(), f.ravel().astype(np.float32)])  # indices < 2**24, exact in float32
 
     def cache_key(self, ref: EpisodeRef) -> str:
         fp = json.dumps(self._summaries[ref.key]["fingerprint"], sort_keys=True)
@@ -94,7 +110,8 @@ class ReviewState:
                 "has_ckpt": self.spec is not None, "ckpt": self.args.ckpt,
                 "rollout_slowdown": self.args.rollout_slowdown,
                 "window": self.spec.header() if self.spec else None,
-                "flags_file": str(self.flags.path)}
+                "flags_file": str(self.flags.path), "has_mold": self.mold_bytes is not None,
+                "mold": self.args.mold if self.mold_bytes is not None else None}
 
     def payload(self, ref: EpisodeRef) -> bytes:
         with self._lru_lock:
@@ -202,6 +219,10 @@ def make_handler(state: ReviewState):
             try:
                 if path == "/api/episodes":
                     return self._json(200, state.episodes_json())
+                if path == "/api/mold":
+                    if state.mold_bytes is None:
+                        return self._json(404, {"error": "no mold mesh (run with --mold)"})
+                    return self._send(200, state.mold_bytes, "application/octet-stream")
                 m = _EP_RE.match(path)
                 if m:
                     try:

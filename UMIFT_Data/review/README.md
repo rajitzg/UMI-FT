@@ -29,6 +29,9 @@ Options:
   - Without `--ckpt`, the plots show no history overlays.
 - `--rollout-slowdown 2`: the runner's `slow_down_factor`, used by the "rollout (approx.)" history view.
 - `--session NAME` / `--flags FILE`: where flags are stored. The default is `/mnt/data/umidata/ft/datasets/review_flags/<session>.json`.
+- `--mold FIELD.npz`: stringer mesh drawn in 3D. The default is `/mnt/data/umidata/ft/mold_aware_datasets/stringer_v3.5_fixb/shared/fixb_field.npz`, the Fix B field built from scan `stringer_scan_20261008_170729`.
+  - The flange apron is dropped and the mesh is decimated to 20k triangles. `none` disables it.
+  - The mesh is in the fixture (tag0) frame, the same frame as the poses. It only lines up while the mold has not moved relative to the fixture tags since that scan.
 - `--cache-dir`: where MP4s, thumbnails and sprites are cached. The default is `~/.cache/umift_review`. It is safe to delete.
 
 ## Screen
@@ -43,6 +46,7 @@ The screen has these parts:
   - The *3D start* and *3D end* sliders limit how much of the path is drawn.
   - *lock plots to 3D range* zooms the plots to the same window.
   - The path is a thick line coloured by time or by |F|. The current pose has a solid RGB axis triad, and the pose-observation history is drawn as blue points.
+  - *stringer* shows or hides the mold mesh (semi-transparent grey).
   - *virtual setpoint* adds the virtual target (`ts_pose_virtual_target_0`) as a dashed line, both in 3D and on the position plot.
   - To keep thick lines fast, the 3D path draws at most 2500 points of the visible range.
 - **Plots:** force with |F| (on top), position, orientation, and a collapsible group with torque, speed, VT offset and stiffness.
