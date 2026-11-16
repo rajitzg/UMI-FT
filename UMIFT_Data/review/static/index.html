@@ -1,2 +1,98 @@
 <!DOCTYPE html>
-<html><head><title>Episode review</title></head><body></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Episode review</title>
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="side-head">
+    <div class="filters" id="filters">
+      <button data-f="all" class="on">all</button><button data-f="base">base</button><button data-f="dagger">dagger</button>
+      <button data-f="none">unflagged</button><button data-f="keep">keep</button><button data-f="reject">reject</button><button data-f="stale">stale</button>
+    </div>
+    <div id="counts"></div>
+  </div>
+  <ul id="eplist"></ul>
+  <div class="side-foot">
+    <label title="Move to the next episode after P / X"><input type="checkbox" id="autoadv"> auto-advance after flag</label>
+    <button id="exportBtn">Export…</button>
+    <div id="flagsFile" class="muted"></div>
+  </div>
+</aside>
+
+<main id="main">
+  <div id="toprow">
+    <div id="videoCol">
+      <div id="videoWrap"><video id="video" muted playsinline preload="auto"></video></div>
+      <canvas id="rgbStrip" height="18"></canvas>
+      <div id="filmstripRow"><span class="muted lbl">RGB obs</span><canvas id="filmstrip" height="44"></canvas></div>
+    </div>
+    <div id="pathCol">
+      <div id="path3d"></div>
+      <div class="rangeRow">
+        <span>3D start</span><input type="range" id="r3dStart" min="0" max="1000" value="0">
+        <span id="r3dStartLbl" class="mono"></span>
+      </div>
+      <div class="rangeRow">
+        <span>3D end</span><input type="range" id="r3dEnd" min="0" max="1000" value="1000">
+        <span id="r3dEndLbl" class="mono"></span>
+      </div>
+      <div class="rangeRow small">
+        <label><input type="checkbox" id="lockRange"> lock plots to 3D range</label>
+        <label>colour <select id="colorBy"><option value="time">time</option><option value="force">|F|</option></select></label>
+        <button id="r3dReset">full</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="transport">
+    <button id="playBtn" title="Space">▶</button>
+    <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+    <input type="range" id="timeSlider" min="0" max="0" value="0" step="1">
+    <span id="timeLbl" class="mono"></span>
+  </div>
+
+  <div id="infoRow">
+    <span id="epTitle"></span>
+    <span id="flagBadge" class="badge"></span>
+    <span id="sampledLbl" class="muted"></span>
+    <span class="toggles" id="ckptToggles">
+      <label><input type="checkbox" id="showHist" checked> history</label>
+      <label><select id="histMode"><option value="training">training window</option><option value="rollout">rollout (approx.)</option></select></label>
+      <label><input type="checkbox" id="showUnsampled" checked> never-sampled</label>
+    </span>
+    <input id="note" placeholder="note (N)" autocomplete="off">
+  </div>
+
+  <div id="legendKey" class="muted small"></div>
+  <div id="charts"></div>
+  <div id="help" class="muted small">
+    Space play · ←/→ frame · Shift+←/→ 1 s · ↑/↓ episode · P keep · X reject · U unflag · N note · [ / ] 3D start/end at cursor ·
+    drag on a plot to zoom, double-click to reset, click to seek
+  </div>
+</main>
+
+<dialog id="exportDlg">
+  <form method="dialog" id="exportForm">
+    <h3>Export selection</h3>
+    <label>Output zarr <input id="exOut" size="70"></label>
+    <div>
+      <label><input type="radio" name="inc" value="keep" checked> keep only</label>
+      <label><input type="radio" name="inc" value="keep+unflagged"> keep + unflagged</label>
+      <label><input type="checkbox" id="exOverwrite"> overwrite</label>
+    </div>
+    <pre id="exResult"></pre>
+    <div class="dlgBtns">
+      <button type="button" id="exDry">Dry run</button>
+      <button type="button" id="exGo">Export</button>
+      <button value="cancel">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
