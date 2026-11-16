@@ -56,6 +56,8 @@ def test_payload_roundtrip_lengths(tmp_path):
     np.testing.assert_allclose(a2["pose_t"], g["robot_time_stamps_0"][:].ravel(), rtol=0, atol=1e-5)
     assert len(a2["px"]) == len(a2["pose_t"]) and len(a2["fx"]) == len(a2["wrench_t"])
     np.testing.assert_allclose(a2["vt_off"], 0.01, atol=1e-6)
+    np.testing.assert_allclose(a2["vty"] - a2["py"], 0.01, atol=1e-6)  # virtual target position
+    assert len(a2["vtx"]) == len(a2["pose_t"]) and len(a2["vtz"]) == len(a2["pose_t"])
     np.testing.assert_allclose(a2["fmag"], np.abs(a2["fy"]), atol=1e-5)
     assert h2["fps"] == 15.0 or abs(h2["fps"] - 15.0) < 1e-6
 

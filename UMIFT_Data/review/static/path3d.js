@@ -1,7 +1,28 @@
-// three.js tool path. Geometry is built once per episode; the start/end range uses
-// setDrawRange (no rebuild). Renders on demand only (dirty flag).
+// three.js tool path: thick Line2 path coloured by time or |F|, optional dashed
+// virtual-target path, solid axis triad at the cursor. Renders on demand only.
 import * as THREE from "./vendor/three.module.min.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
+import { Line2 } from "./vendor/Line2.js";
+import { LineGeometry } from "./vendor/LineGeometry.js";
+import { LineMaterial } from "./vendor/LineMaterial.js";
+
+const PATH_WIDTH_PX = 3;
+const VT_WIDTH_PX = 2;
+const MAX_LINE_POINTS = 2500;
+
+// RGB axis triad from solid cylinders (WebGL ignores line widths > 1).
+function makeTriad(len, rad) {
+  const g = new THREE.Group();
+  const geo = new THREE.CylinderGeometry(rad, rad, len, 8);
+  geo.translate(0, len / 2, 0); // cylinder runs along +Y from the origin
+  const axes = [[0xd62728, [0, 0, -Math.PI / 2]], [0x2ca02c, [0, 0, 0]], [0x1f77b4, [Math.PI / 2, 0, 0]]];
+  for (const [color, [rx, ry, rz]] of axes) {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
+    m.rotation.set(rx, ry, rz);
+    g.add(m);
+  }
+  return g;
+}
 
 const STOPS = [[0.267, 0.005, 0.329], [0.229, 0.322, 0.546], [0.128, 0.567, 0.551], [0.369, 0.789, 0.383], [0.993, 0.906, 0.144]];
 function viridis(u) {
@@ -52,20 +73,58 @@ export function createPath3d(container, arrays, header) {
   c.copy(bs.center);
   const colors = new Float32Array(n * 3);
   geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ vertexColors: true }));
-  scene.add(line);
+  // Thick path + dashed virtual-target path as Line2. Line2 has no draw range, so the
+  // visible [start, end] slice is rebuilt (lazily, once per animation frame).
+  const vtPos = new Float32Array(n * 3);
+  const hasVt = !!arrays.vtx;
+  if (hasVt) for (let i = 0; i < n; i++) { vtPos[3 * i] = arrays.vtx[i]; vtPos[3 * i + 1] = arrays.vty[i]; vtPos[3 * i + 2] = arrays.vtz[i]; }
+  const pathMat = new LineMaterial({ vertexColors: true, linewidth: PATH_WIDTH_PX });
+  const vtMat = new LineMaterial({ color: 0x444444, linewidth: VT_WIDTH_PX, dashed: true });
+  const pathLine = new Line2(new LineGeometry(), pathMat);
+  const vtLine = new Line2(new LineGeometry(), vtMat);
+  vtLine.visible = false;
+  scene.add(pathLine, vtLine);
+  // Thick lines cost one quad per segment; cap the drawn vertices (pose is ~200 Hz,
+  // so this is still several points per mm of tool travel).
+  function decimate(arr, i0, i1) {
+    const k = Math.max(1, Math.ceil((i1 - i0) / MAX_LINE_POINTS));
+    if (k === 1) return arr.subarray(3 * i0, 3 * i1);
+    const m = Math.ceil((i1 - i0) / k) + 1, out = new Float32Array(3 * m);
+    let j = 0;
+    for (let i = i0; i < i1; i += k, j++) { out[3 * j] = arr[3 * i]; out[3 * j + 1] = arr[3 * i + 1]; out[3 * j + 2] = arr[3 * i + 2]; }
+    const l = i1 - 1; out[3 * j] = arr[3 * l]; out[3 * j + 1] = arr[3 * l + 1]; out[3 * j + 2] = arr[3 * l + 2];
+    return out.subarray(0, 3 * (j + 1));
+  }
+  let range = [0, n];
+  let linesDirty = true;
+  function rebuildLines() {
+    const [i0, i1] = range;
+    if (i1 - i0 < 2) { pathLine.visible = false; return; }
+    pathLine.visible = true;
+    const g = new LineGeometry();
+    g.setPositions(decimate(pos, i0, i1));
+    g.setColors(decimate(colors, i0, i1));
+    pathLine.geometry.dispose(); pathLine.geometry = g;
+    if (hasVt && vtLine.visible) {
+      const gv = new LineGeometry();
+      gv.setPositions(decimate(vtPos, i0, i1));
+      vtLine.geometry.dispose(); vtLine.geometry = gv;
+      vtLine.computeLineDistances();
+    }
+  }
 
   const histGeom = new THREE.BufferGeometry(); // shares the position buffer, own draw range
   histGeom.setAttribute("position", geom.attributes.position);
   histGeom.setDrawRange(0, 0);
-  const hist = new THREE.Points(histGeom, new THREE.PointsMaterial({ color: 0x1f77b4, size: 4, sizeAttenuation: false }));
+  const hist = new THREE.Points(histGeom, new THREE.PointsMaterial({ color: 0x1f77b4, size: 7, sizeAttenuation: false }));
   scene.add(hist);
 
   const r = Math.max(bs.radius, 0.01);
   const marker = new THREE.Mesh(new THREE.SphereGeometry(r * 0.025, 12, 8), new THREE.MeshBasicMaterial({ color: 0x000000 }));
   scene.add(marker);
-  const triad = new THREE.AxesHelper(r * 0.15);
+  const triad = makeTriad(r * 0.18, r * 0.008);
   scene.add(triad);
+  vtMat.dashSize = r * 0.02; vtMat.gapSize = r * 0.015;
   const grid = new THREE.AxesHelper(r * 0.3);
   grid.position.copy(c);
   grid.material.transparent = true; grid.material.opacity = 0.25;
@@ -87,7 +146,7 @@ export function createPath3d(container, arrays, header) {
     } else { vals = tArr; lo = tArr[0]; hi = tArr[n - 1]; }
     const span = hi > lo ? hi - lo : 1;
     for (let i = 0; i < n; i++) { const [rr, g, b] = viridis((vals[i] - lo) / span); colors[3 * i] = rr; colors[3 * i + 1] = g; colors[3 * i + 2] = b; }
-    geom.attributes.color.needsUpdate = true;
+    linesDirty = true;
     dirty = true;
   }
   setColorBy("time");
@@ -96,6 +155,7 @@ export function createPath3d(container, arrays, header) {
     const w = container.clientWidth, h = container.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h);
+    pathMat.resolution.set(w, h); vtMat.resolution.set(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix(); dirty = true;
   }
   const ro = new ResizeObserver(resize);
@@ -106,6 +166,7 @@ export function createPath3d(container, arrays, header) {
   let alive = true;
   (function loop() {
     if (!alive) return;
+    if (linesDirty) { rebuildLines(); linesDirty = false; dirty = true; }
     if (dirty) { renderer.render(scene, camera); dirty = false; }
     requestAnimationFrame(loop);
   })();
@@ -114,8 +175,9 @@ export function createPath3d(container, arrays, header) {
   return {
     setRange(a, b) {
       const i0 = lowerBound(tArr, a), i1 = Math.max(i0 + 1, lowerBound(tArr, b));
-      geom.setDrawRange(i0, i1 - i0); dirty = true;
+      range = [i0, Math.min(n, i1)]; linesDirty = true;
     },
+    setShowVt(show) { vtLine.visible = show && hasVt; linesDirty = true; },
     setCursor(t, histFrom) {
       const i = Math.min(n - 1, lowerBound(tArr, t));
       marker.position.set(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
@@ -127,6 +189,6 @@ export function createPath3d(container, arrays, header) {
       dirty = true;
     },
     setColorBy,
-    destroy() { alive = false; ro.disconnect(); controls.dispose(); renderer.dispose(); geom.dispose(); container.innerHTML = ""; },
+    destroy() { alive = false; ro.disconnect(); controls.dispose(); renderer.dispose(); geom.dispose(); pathLine.geometry.dispose(); vtLine.geometry.dispose(); pathMat.dispose(); vtMat.dispose(); container.innerHTML = ""; },
   };
 }

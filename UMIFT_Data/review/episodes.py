@@ -181,6 +181,8 @@ def build_payload(
     named.append(("speed", speed[sel]))
     named.append(("stiffness", stiff[sel] if len(stiff) == n else np.resize(stiff, n)[sel]))
     named.append(("vt_off", np.linalg.norm(vt[:, :3] - pose[:, :3], axis=1)[sel]))
+    for j, nm in enumerate(["vtx", "vty", "vtz"]):
+        named.append((nm, vt[sel, j]))
 
     wr_t = np.ravel(group["wrench_time_stamps_0"][:]).astype(np.float64)
     wr = np.asarray(group["wrench_left_0"][:], dtype=np.float64)

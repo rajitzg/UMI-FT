@@ -42,8 +42,10 @@ The screen has these parts:
 - **3D path:** shown in the fixture frame, with +Y down and the camera on the operator side.
   - The *3D start* and *3D end* sliders limit how much of the path is drawn.
   - *lock plots to 3D range* zooms the plots to the same window.
-  - The path can be coloured by time or by |F|. The current pose has an axis triad, and the pose-observation history is drawn as blue points.
-- **Plots:** position, orientation, force with |F|, and a collapsible group with torque, speed, VT offset and stiffness.
+  - The path is a thick line coloured by time or by |F|. The current pose has a solid RGB axis triad, and the pose-observation history is drawn as blue points.
+  - *virtual setpoint* adds the virtual target (`ts_pose_virtual_target_0`) as a dashed line, both in 3D and on the position plot.
+  - To keep thick lines fast, the 3D path draws at most 2500 points of the visible range.
+- **Plots:** force with |F| (on top), position, orientation, and a collapsible group with torque, speed, VT offset and stiffness.
   - **Orientation** is euler xyz in degrees, relative to one fixed reference rotation (the mean orientation of the first episode). Absolute euler angles sit near gimbal lock for this tool.
   - **Shading:** blue is the pose observation window, red is the wrench observation window, orange is the action horizon ahead, grey is never sampled, light grey is the start pad, purple is a scan gap, and magenta lines are pose jumps (more than 5 mm between consecutive samples).
   - **Training vs. rollout view:** the *training* view uses the exact sampler index math. *Rollout (approx.)* stretches the windows by the slowdown factor.
@@ -102,4 +104,4 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest UMIFT_Data/tests/test_review_*
 
 The tests marked `slow` use the real reference checkpoint and dataset, and skip when they are absent. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` avoids the ROS pytest plugins on this machine.
 
-Vendored front-end libraries are in `static/vendor/`: uPlot 1.6.31 and three.js r170 with `OrbitControls`, whose import was rewritten to `./three.module.min.js`.
+Vendored front-end libraries are in `static/vendor/`: uPlot 1.6.31 and three.js r170, with `OrbitControls` and the `Line2` / `LineMaterial` / `LineGeometry` / `LineSegments2` / `LineSegmentsGeometry` fat-line modules. Their imports were rewritten to `./three.module.min.js` and `./<module>.js`.

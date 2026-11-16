@@ -8,10 +8,12 @@ const C = { x: "#d62728", y: "#2ca02c", z: "#1f77b4", mag: "#333", a: "#9467bd",
 const HIST = { pose: "rgba(31,119,180,0.13)", wrench: "rgba(214,39,40,0.12)", action: "rgba(255,160,0,0.22)" };
 const TICK = { pose: "rgba(31,119,180,0.9)", wrench: "rgba(214,39,40,0.9)", action: "rgba(230,130,0,0.95)" };
 
+// Series entry: [array name, label, colour, y scale?, "vt" = dashed virtual-target series hidden by default].
 const CHARTS = [
-  { id: "pos", title: "position (m, fixture frame)", t: "pose_t", s: [["px", "x", C.x], ["py", "y", C.y], ["pz", "z", C.z]], hist: "pose" },
-  { id: "rot", title: "orientation (deg, euler xyz relative to reference)", t: "pose_t", s: [["rx", "rx", C.x], ["ry", "ry", C.y], ["rz", "rz", C.z]], hist: "pose" },
   { id: "force", title: "force (N, TCP frame)", t: "wrench_t", s: [["fx", "fx", C.x], ["fy", "fy", C.y], ["fz", "fz", C.z], ["fmag", "|F|", C.mag]], hist: "wrench" },
+  { id: "pos", title: "position (m, fixture frame) · dashed = virtual setpoint", t: "pose_t",
+    s: [["px", "x", C.x], ["py", "y", C.y], ["pz", "z", C.z], ["vtx", "vt x", C.x, null, "vt"], ["vty", "vt y", C.y, null, "vt"], ["vtz", "vt z", C.z, null, "vt"]], hist: "pose" },
+  { id: "rot", title: "orientation (deg, euler xyz relative to reference)", t: "pose_t", s: [["rx", "rx", C.x], ["ry", "ry", C.y], ["rz", "rz", C.z]], hist: "pose" },
   { id: "torque", title: "torque (Nm, TCP frame)", t: "wrench_t", s: [["tx", "tx", C.x], ["ty", "ty", C.y], ["tz", "tz", C.z]], hist: "wrench", more: true },
   { id: "misc", title: "speed (m/s) · VT offset (m) · stiffness (right axis)", t: "pose_t",
     s: [["speed", "speed", C.a], ["vt_off", "vt offset", C.b], ["stiffness", "stiffness", C.c, "stiff"]], hist: "pose", more: true },
@@ -35,7 +37,7 @@ export function createPlots(container, arrays, header, opts) {
   container.innerHTML = "";
   const charts = [];
   const unsampled = arrays.sampled ? intervalsFromMask(arrays.rgb_t, arrays.sampled) : [];
-  const state = { t: 0, frame: 0, showHist: true, mode: "training", showUnsampled: true, slow: header.rollout_slowdown || 2 };
+  const state = { t: 0, frame: 0, showHist: true, mode: "training", showUnsampled: true, slow: header.rollout_slowdown || 2, showVt: !!opts.showVt };
   let syncing = false;
   const t0 = arrays.rgb_t[0], t1 = arrays.rgb_t[arrays.rgb_t.length - 1];
   let moreBox = null;
@@ -69,8 +71,12 @@ export function createPlots(container, arrays, header, opts) {
     div.appendChild(title);
     parent.appendChild(div);
     const tArr = arrays[def.t];
-    const data = [tArr, ...def.s.map(s => arrays[s[0]])];
-    const series = [{}, ...def.s.map(s => ({ label: s[1], stroke: s[2], width: 1, scale: s[3] || "y", points: { show: false } }))];
+    const defs = def.s.filter(s => arrays[s[0]]);
+    const data = [tArr, ...defs.map(s => arrays[s[0]])];
+    const series = [{}, ...defs.map(s => ({
+      label: s[1], stroke: s[2], width: s[4] === "vt" ? 1.5 : 1, scale: s[3] || "y", points: { show: false },
+      ...(s[4] === "vt" ? { dash: [5, 4], show: state.showVt } : {}),
+    }))];
     const axes = [{ size: 30 }, { size: 55 }];
     const scales = { x: { time: false } };
     if (def.s.some(s => s[3] === "stiff")) { axes.push({ scale: "stiff", side: 1, grid: { show: false }, size: 50 }); scales.stiff = {}; }
@@ -93,7 +99,7 @@ export function createPlots(container, arrays, header, opts) {
     const ovl = document.createElement("canvas");
     ovl.className = "ovl";
     u.over.appendChild(ovl);
-    const c = { def, u, ovl, ctx: ovl.getContext("2d"), dirty: true, div };
+    const c = { def, u, ovl, ctx: ovl.getContext("2d"), dirty: true, div, vtIdx: defs.flatMap((s, i) => (s[4] === "vt" ? [i + 1] : [])) };
     u._rc = c;
     sizeOverlay(c);
     let downX = null;
@@ -188,6 +194,7 @@ export function createPlots(container, arrays, header, opts) {
     setXRange(a, b) { charts[0].u.setScale("x", { min: a, max: b }); },
     resetX() { charts[0].u.setScale("x", { min: t0, max: t1 }); },
     setHistory(show, mode) { state.showHist = show; state.mode = mode; for (const c of charts) drawOverlay(c); },
+    setVt(show) { state.showVt = show; for (const c of charts) for (const i of c.vtIdx) c.u.setSeries(i, { show }); },
     setUnsampled(show) { state.showUnsampled = show; for (const c of charts) c.u.redraw(false, false); },
     get moreOpen() { return moreBox.open; },
     destroy() { ro.disconnect(); for (const c of charts) c.u.destroy(); container.innerHTML = ""; },
