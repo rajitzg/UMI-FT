@@ -201,6 +201,8 @@ def run_layup_scan_periodic(
                     f"--right-return-joints={joints_csv}",
                     f"--compare-low={low_ply}",
                     f"--compare-timeout={compare_timeout_s}",
+                    # Only heatmaps + metadata/metrics are kept for periodic scans.
+                    "--prune-after=heatmaps",
                 ],
                 cwd=str(keyence_ws),
                 capture_output=True,
@@ -224,10 +226,8 @@ def run_layup_scan_periodic(
                     "Could not parse LAYUP_SESSION_DIR from scan output"
                 )
             session_dir = Path(session_dir_s)
-            high_ply = session_dir / "merged.ply"
-            if not high_ply.is_file():
-                raise FileNotFoundError(f"Expected merged cloud missing: {high_ply}")
-
+            # merged.ply is pruned by run_layup_scan.py once the compare is
+            # done; a failed compare just yields no heatmap below.
             heatmap = load_compare_heatmap(
                 scan_id=scan_id,
                 png_path=session_dir / "distance_heatmap.png",

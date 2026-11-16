@@ -66,6 +66,19 @@ HYDRA_FULL_ERROR=1 accelerate launch train.py --config-name=train_umift_workspac
 
 On the cluster, `UMI-FT/docker/train_klone.sbatch` does the same with `task.dataset_path=/data/acp_replay_buffer.zarr`.
 
+**Building the training image (Docker -> Apptainer `.sif`)**
+
+```bash
+cd /home/boeing/umi_ft_ws/worktrees/<worktree>
+docker build -f docker/Dockerfile --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t umift-train:local .
+cd /home/boeing/umi_ft_ws/data/images        # existing images: umift-train_v*.sif
+apptainer build umift-train_vN.sif docker-daemon://umift-train:local   # bump N
+```
+
+To use it on Hyak, copy the `.sif` over yourself (e.g. `scp`/`rsync`; needs interactive login + Duo) and point `SIF=` at it
+when submitting: `SIF=/gscratch/.../umift-train_vN.sif TASK=... sbatch UMI-FT/docker/train_klone.sbatch`
+(default is `/gscratch/scrubbed/rzghosh/images/umift-train.sif`). Local runs use the `pyrite` conda env, not the image.
+
 **4. Point inference at the checkpoint** in `UMI-FT/PyriteEnvSuites/env_runners/umift_env_runner.py`.
 
 `ckpt_path` is `/stringer_scanner_v2/epoch=0025-train_loss=0.020.ckpt`, joined with `$PYRITE_CHECKPOINT_FOLDERS`. Full file: `/mnt/data/umidata/ft/training_outputs/stringer_scanner_v2/epoch=0025-train_loss=0.020.ckpt`. A later `epoch=0035` sits next to it and is not what inference loads.

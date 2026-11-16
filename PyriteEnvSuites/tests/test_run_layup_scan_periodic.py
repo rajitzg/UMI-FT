@@ -46,6 +46,7 @@ _FAKE_SCAN_SRC = textwrap.dedent(
         p.add_argument("--right-return-joints", default=None)
         p.add_argument("--compare-low", default=None)
         p.add_argument("--compare-timeout", type=float, default=120.0)
+        p.add_argument("--prune-after", default="final-mesh")
         p.add_argument("--fail", action="store_true")
         args = p.parse_args()
 

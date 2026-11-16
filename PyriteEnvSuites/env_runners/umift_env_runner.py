@@ -276,6 +276,25 @@ def run_compare_pointcloud(
             + ", ".join(zone_bits)
         )
     print(f"[layup-eval] [bg] Heatmap: {result['heatmap_png']}")
+    # Eval scans keep only heatmaps + metadata/metrics; drop merged.ply & co.
+    # (prune refuses, and keeps everything, if the heatmap grid is missing).
+    prune_proc = subprocess.run(
+        [
+            str(keyence_python),
+            str(keyence_ws / "scripts" / "prune_scan_session.py"),
+            str(session_dir),
+        ],
+        cwd=str(keyence_ws),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if prune_proc.returncode != 0:
+        print(
+            f"[layup-eval] [bg] prune skipped for {session_dir}: "
+            f"{(prune_proc.stderr or prune_proc.stdout).strip()}",
+            flush=True,
+        )
     return result
 
 
