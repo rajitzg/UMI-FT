@@ -123,6 +123,9 @@ def action_ticks(action_times: np.ndarray, rgb_times: np.ndarray, horizon: int, 
     action_times = np.asarray(action_times, dtype=np.float64).reshape(-1)
     rgb_times = np.asarray(rgb_times, dtype=np.float64).reshape(-1)
     out = np.empty((len(rgb_times), horizon), dtype=np.float32)
+    if len(rgb_times) < 2 or len(action_times) == 0:  # sampler helper needs >= 2 rgb frames
+        out[:] = rgb_times[:, None] if len(rgb_times) else 0.0
+        return out
     for i in range(len(rgb_times)):
         idx, _ = sparse_action_indices_from_rgb_timestamps(action_times, rgb_times, i, horizon, rgb_stride)
         if len(idx) == 0:
@@ -166,7 +169,16 @@ def sampled_mask(group: zarr.Group, episode_index: int, spec: WindowSpec) -> np.
     return m
 
 
-def episode_window_arrays(group: zarr.Group, episode_index: int, spec: WindowSpec) -> Dict[str, np.ndarray]:
+def episode_window_arrays(group: zarr.Group, episode_index: int, spec: WindowSpec) -> Tuple[Dict[str, np.ndarray], dict]:
+    """Window tick arrays + info. Episodes the training sampler rejects (it raises on
+    some malformed episodes) get an all-False ``sampled`` mask and
+    ``info["sampled_error"]`` instead of failing the whole payload."""
+    try:
+        sampled = sampled_mask(group, episode_index, spec)
+        err = None
+    except Exception as e:
+        sampled = np.zeros(int(group["rgb_0"].shape[0]), dtype=bool)
+        err = f"{type(e).__name__}: {e}"
     rgb_t = np.ravel(group["rgb_time_stamps_0"][:]).astype(np.float64)
     rob_t = np.ravel(group["robot_time_stamps_0"][:]).astype(np.float64)
     wr_t = np.ravel(group["wrench_time_stamps_0"][:]).astype(np.float64)
@@ -175,5 +187,5 @@ def episode_window_arrays(group: zarr.Group, episode_index: int, spec: WindowSpe
         "win_pose": window_ticks(rob_t, rgb_t, *spec.low_dim).ravel(),
         "win_wrench": window_ticks(wr_t, rgb_t, *spec.wrench).ravel(),
         "win_action": action_ticks(rob_t, rgb_t, *spec.action).ravel(),
-        "sampled": sampled_mask(group, episode_index, spec).astype(np.float32),
-    }
+        "sampled": sampled.astype(np.float32),
+    }, {"sampled_error": err}

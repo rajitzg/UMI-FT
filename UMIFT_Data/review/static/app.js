@@ -5,7 +5,7 @@ import { createPath3d, lowerBound } from "./path3d.js";
 
 const $ = id => document.getElementById(id);
 const S = {
-  episodes: [], meta: null, filter: "all", cur: null, ep: null, token: 0,
+  episodes: [], meta: null, filter: "all", cur: null, ep: null, token: 0, loading: null, flagging: false,
   frame: 0, t: 0, playing: false, dirty: true,
   seeking: false, pendingSeek: null,
   showHist: true, histMode: "training", showUnsampled: true, colorBy: "time",
@@ -77,9 +77,21 @@ async function openEpisode(key) {
   const tok = ++S.token;
   const e = S.episodes.find(x => x.key === key);
   if (!e) return;
-  const buf = await (await fetch(`/api/episode/${key}/data`)).arrayBuffer();
-  if (tok !== S.token) return;
-  const ep = decodePayload(buf);
+  S.loading = key;  // flag keys are ignored until this episode is on screen
+  let ep;
+  try {
+    const r = await fetch(`/api/episode/${key}/data`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const buf = await r.arrayBuffer();
+    if (tok !== S.token) return;
+    ep = decodePayload(buf);
+  } catch (err) {
+    if (tok !== S.token) return;
+    S.loading = null;
+    alert(`Could not load ${key}: ${err.message}\nStill showing ${S.cur ? S.cur.key : "nothing"}; flags apply to that.`);
+    return;
+  }
+  S.loading = null;
   S.cur = e; S.ep = ep;
   history.replaceState(null, "", "#" + key);
   pause();
@@ -253,7 +265,8 @@ function tick() {
       $("timeSlider").value = S.frame;
       const sm = S.ep.arrays.sampled;
       $("timeLbl").textContent = `t=${fmtT(S.t)} s  frame ${S.frame + 1}/${nFrames()}`;
-      $("sampledLbl").textContent = sm ? (sm[S.frame] ? "" : "not a training query") : "";
+      $("sampledLbl").textContent = S.ep.header.sampled_error ? `sampler rejects this episode (${S.ep.header.sampled_error})`
+        : sm ? (sm[S.frame] ? "" : "not a training query") : "";
     }
   }
   requestAnimationFrame(tick);
@@ -270,9 +283,16 @@ async function postFlag(body) {
 }
 
 async function flag(f) {
-  if (!S.cur) return;
-  await postFlag({ flag: f });
-  if ($("autoadv").checked && f !== "none") step(1);
+  // One flag at a time, and none while the next episode loads: a key pressed during
+  // either would otherwise land on the episode that is still on screen.
+  if (!S.cur || S.loading || S.flagging) return;
+  S.flagging = true;
+  try {
+    await postFlag({ flag: f });
+    if ($("autoadv").checked && f !== "none") step(1);
+  } finally {
+    S.flagging = false;
+  }
 }
 
 function step(d) {

@@ -37,6 +37,7 @@ DEFAULT_BASE = [f"{DATA_ROOT}/stringer_v3.5_base/acp_replay_buffer.zarr"]
 DEFAULT_DAGGER = [f"{DATA_ROOT}/stringer_v3.5_dagger{s}/acp_replay_buffer.zarr" for s in ("", "_2", "_3")]
 STATIC = _HERE / "static"
 LRU_SIZE = 6
+_LAST_STATE = None  # the most recent ReviewState (tests reach it through this)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -75,6 +76,7 @@ class ReviewState:
         self._lru_lock = threading.Lock()
         self._build_locks: dict = {}
         self._pool = ThreadPoolExecutor(max_workers=2)
+        self.export_lock = threading.Lock()
         self._summaries = {e.key: self.index.summary(e) for e in self.index.episodes}
 
     def cache_key(self, ref: EpisodeRef) -> str:
@@ -110,7 +112,9 @@ class ReviewState:
             header, arrays = build_payload(g, extra=extra, root_attrs=self.index.root_attrs(ref), r_ref=self.r_ref)
             if self.spec is not None:
                 from review.policy_window import episode_window_arrays
-                append_arrays(header, arrays, episode_window_arrays(g, ref.index, self.spec))
+                win, info = episode_window_arrays(g, ref.index, self.spec)
+                append_arrays(header, arrays, win)
+                header.update(info)
                 header["window"] = self.spec.header()
                 header["rollout_slowdown"] = self.args.rollout_slowdown
             buf = encode_payload(header, arrays)
@@ -175,7 +179,8 @@ def make_handler(state: ReviewState):
         def _file(self, path: Path, ctype: str, ranged: bool = False):
             data = path.read_bytes()
             rng = self.headers.get("Range") if ranged else None
-            if rng and (m := _RANGE_RE.match(rng.strip())):
+            m = _RANGE_RE.match(rng.strip()) if rng else None
+            if m and (m.group(1) or m.group(2)):
                 size = len(data)
                 a, b = m.group(1), m.group(2)
                 if a == "":
@@ -232,6 +237,13 @@ def make_handler(state: ReviewState):
 
         def do_POST(self):
             path = self.path.split("?", 1)[0]
+            # Only same-origin JSON: blocks no-preflight cross-site form/text posts.
+            if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+                return self._json(415, {"error": "Content-Type must be application/json"})
+            origin = self.headers.get("Origin")
+            port = self.server.server_address[1]
+            if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+                return self._json(403, {"error": f"foreign origin {origin}"})
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
@@ -245,11 +257,16 @@ def make_handler(state: ReviewState):
                     return self._json(200, state.flags.status(ref, fp))
                 if path == "/api/export":
                     from review.review_export import export_selection
-                    s = export_selection(state.index, state.flags, Path(body["output"]).expanduser(),
+                    if not state.export_lock.acquire(blocking=False):
+                        return self._json(409, {"error": "an export is already running"})
+                    try:
+                        s = export_selection(state.index, state.flags, Path(body["output"]).expanduser(),
                                          include=body.get("include", "keep"),
                                          overwrite=bool(body.get("overwrite")),
                                          dry_run=bool(body.get("dry_run")),
                                          command=["review_server /api/export", json.dumps(body)])
+                    finally:
+                        state.export_lock.release()
                     return self._json(200, s)
                 return self._json(404, {"error": "not found"})
             except (ValueError, KeyError, FileExistsError, OSError) as e:
@@ -262,7 +279,9 @@ def make_handler(state: ReviewState):
 
 
 def make_server(args: argparse.Namespace) -> ThreadingHTTPServer:
+    global _LAST_STATE
     state = ReviewState(args)
+    _LAST_STATE = state
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     srv.daemon_threads = True
     srv.state = state

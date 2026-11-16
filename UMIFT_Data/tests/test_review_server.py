@@ -117,3 +117,53 @@ def test_unknown_episode_404(server):
     with pytest.raises(urllib.error.HTTPError) as e:
         _get(url + "/api/episode/nope/3/data")
     assert e.value.code == 404
+
+
+def _raw_post(url, data, headers):
+    req = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_post_requires_json_content_type(server):
+    url, tmp = server
+    body = json.dumps({"key": "dagger/0", "flag": "reject"}).encode()
+    assert _raw_post(url + "/api/flag", body, {"Content-Type": "text/plain"}) == 415
+    assert not (tmp / "flags.json").exists()
+
+
+def test_post_rejects_foreign_origin(server):
+    url, _ = server
+    body = json.dumps({"key": "dagger/0", "flag": "reject"}).encode()
+    st = _raw_post(url + "/api/flag", body, {"Content-Type": "application/json", "Origin": "http://evil.example"})
+    assert st == 403
+    st = _raw_post(url + "/api/flag", body, {"Content-Type": "application/json", "Origin": url})
+    assert st == 200
+
+
+def test_export_busy_is_409(server):
+    url, tmp = server
+    srv_state = review_server._LAST_STATE
+    with srv_state.export_lock:
+        st, d = _post(url + "/api/export", {"output": str(tmp / "o" / "acp_replay_buffer.zarr")})
+    assert st == 409
+
+
+def test_data_endpoint_with_spec_survives_short_robot_stream(server):
+    import zarr as _z
+    from test_review_policy_window import _hist_spec, _truncate_robot
+    url, tmp = server
+    _truncate_robot(tmp / "stringer_v3.5_dagger" / "acp_replay_buffer.zarr", 100)
+    review_server._LAST_STATE.spec = _hist_spec()
+    st, h, body = _get(url + "/api/episode/dagger/0/data")
+    header, arrays = _decode(body)
+    assert st == 200 and header["sampled_error"] and not arrays["sampled"].any()
+
+
+def test_malformed_range_is_not_500(server):
+    url, _ = server
+    st, h, body = _get(url + "/api/episode/base/0/video.mp4", {"Range": "bytes=-"})
+    assert st == 200

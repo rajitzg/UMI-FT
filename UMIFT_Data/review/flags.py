@@ -45,9 +45,15 @@ class FlagStore:
         if flag is not None and flag not in FLAGS:
             raise ValueError(f"flag must be one of {FLAGS}, got {flag!r}")
         with self._lock:
-            e = dict(self.entries.get(ref.key, {"flag": "none", "note": ""}))
-            e.update({"dataset_path": ref.zarr_path, "episode": ref.index, "source": ref.source,
-                      "fingerprint": fp, "updated": datetime.now().isoformat(timespec="seconds")})
+            prev = self.entries.get(ref.key)
+            e = dict(prev or {"flag": "none", "note": ""})
+            e.update({"episode": ref.index, "source": ref.source,
+                      "updated": datetime.now().isoformat(timespec="seconds")})
+            # Only an explicit flag decision binds the entry to the current episode
+            # content; a note-only edit must not turn a stale flag fresh.
+            if flag is not None or prev is None:
+                e["fingerprint"] = fp
+                e["dataset_path"] = ref.zarr_path
             if flag is not None:
                 e["flag"] = flag
             if note is not None:

@@ -103,3 +103,29 @@ def test_selection_json_written(tmp_path):
     assert sel["include"] == "keep" and len(sel["source_map"]) == 1
     assert sel["source_map"][0]["source"] == "dagger"
     assert "dagger/1" in sel["flags"]
+
+
+@pytest.mark.parametrize("which", ["same", "parent", "inside"])
+def test_export_refuses_output_overlapping_a_source(tmp_path, which):
+    idx, fs = _setup(tmp_path)
+    _flag(idx, fs, "base/0", "keep")
+    src = tmp_path / "stringer_v3.5_base" / "acp_replay_buffer.zarr"
+    out = {"same": src, "parent": src.parent, "inside": src / "x.zarr"}[which]
+    with pytest.raises(ValueError, match="source"):
+        export_selection(idx, fs, out, overwrite=True)
+    assert (src / "data" / "episode_1").exists()
+
+
+def test_export_requires_zarr_suffix(tmp_path):
+    idx, fs = _setup(tmp_path)
+    _flag(idx, fs, "base/0", "keep")
+    with pytest.raises(ValueError, match=".zarr"):
+        export_selection(idx, fs, tmp_path / "out" / "somedir", overwrite=True)
+
+
+def test_keep_plus_unflagged_refuses_stale_reject(tmp_path):
+    idx, fs = _setup(tmp_path)
+    ref = idx.get("dagger/0")
+    fs.set(ref, dict(idx.summary(ref)["fingerprint"], n_rgb=1), flag="reject")
+    with pytest.raises(ValueError, match="stale"):
+        export_selection(idx, fs, tmp_path / "out" / "acp_replay_buffer.zarr", include="keep+unflagged")

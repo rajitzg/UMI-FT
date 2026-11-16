@@ -58,6 +58,13 @@ def export_selection(index: DatasetIndex, flags: FlagStore, output: Path, includ
     if include not in INCLUDE:
         raise ValueError(f"include must be one of {INCLUDE}")
     output = Path(output).resolve()
+    for src in index.dataset_paths.values():
+        src = Path(src).resolve()
+        folder = src.parent
+        if output == src or output in src.parents or src in output.parents or output == folder or folder in output.parents:
+            raise ValueError(f"output {output} overlaps source dataset {src}")
+    if output.suffix != ".zarr":
+        raise ValueError(f"output must be a .zarr path, got {output}")
     wanted = {"keep"} if include == "keep" else {"keep", "none"}
 
     selected = []
@@ -68,6 +75,9 @@ def export_selection(index: DatasetIndex, flags: FlagStore, output: Path, includ
             selected.append(ref)
             if st["stale"]:
                 stale.append(ref.key)
+    if include == "keep+unflagged":  # a stale reject would silently drop changed content
+        stale += [ref.key for ref in index.episodes
+                  if ref.key not in stale and flags.status(ref, index.summary(ref)["fingerprint"])["stale"]]
     if stale:
         raise ValueError(f"stale flags (source zarr changed since flagging): {stale}")
     if not selected:

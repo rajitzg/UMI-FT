@@ -82,7 +82,16 @@ Export runs `UMIFT_Data/scripts/merge_umift_zarr_datasets.py`, which now has a d
 
 - Every output episode gets `attrs["source"]` set to `original` or `dagger`. This works with `task.dataset.dagger_frac`.
 - `review_selection.json` is written next to the output. It holds the selected flags, the source map and the command.
-- Export refuses stale flags, an empty selection, an existing output (unless you tick overwrite) and an estimated size above 90% of free disk.
+- Export refuses:
+  - stale flags (with *keep + unflagged*, any stale flag, including stale rejects);
+  - an empty selection;
+  - an output that is not a `.zarr` path, or that equals, contains or lies inside a source dataset or its folder;
+  - an existing output, unless you tick overwrite;
+  - an estimated size above 90% of free disk;
+  - a second export while one is running.
+- The server accepts only same-origin `application/json` POSTs.
+- Flag keys are ignored while a flag is being saved or the next episode is loading, so a quick second key press cannot land on the wrong episode.
+- A note-only edit does not clear a stale flag; only a new P/X/U decision does.
 - Add a work-log entry (`docs/log/`) when an export is used to train.
 
 ## Tests

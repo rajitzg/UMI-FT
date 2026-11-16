@@ -60,7 +60,8 @@ def test_spec_from_hist_cfg():
 def test_episode_window_arrays_shapes(tmp_path):
     p = write_synthetic_episode_zarr(tmp_path / "s" / "acp_replay_buffer.zarr", n_eps=1, n_rgb=150)
     g = zarr.open(str(p), "r")["data"]["episode_0"]
-    arrs = policy_window.episode_window_arrays(g, 0, _hist_spec())
+    arrs, info = policy_window.episode_window_arrays(g, 0, _hist_spec())
+    assert info["sampled_error"] is None
     n = 150
     assert arrs["win_rgb"].shape == (n * 10,)
     assert arrs["win_pose"].shape == (n * 50,)
@@ -107,3 +108,26 @@ def test_sampled_mask_real_episode_matches_query_grid():
     assert len(ids) > 0 and np.all(np.diff(ids) % 2 == 0)  # query stride 2
     m = policy_window.sampled_mask(g, 0, spec)
     assert set(np.flatnonzero(m)) >= set(ids.tolist())
+
+
+def _truncate_robot(p, n_keep):
+    g = zarr.open(str(p), "r+")["data"]["episode_0"]
+    for k in ("ts_pose_fb_0", "ts_pose_command_0", "ts_pose_virtual_target_0", "stiffness_0",
+              "robot_time_stamps_0", "gripper_0", "gripper_time_stamps_0"):
+        a = g[k][:n_keep]
+        del g[k]
+        g.create_dataset(k, data=a)
+    return zarr.open(str(p), "r")["data"]["episode_0"]
+
+
+def test_window_arrays_survive_sampler_failure(tmp_path):
+    p = write_synthetic_episode_zarr(tmp_path / "s" / "acp_replay_buffer.zarr", n_eps=1, n_rgb=60)
+    g = _truncate_robot(p, 100)  # 0.5 s of robot data under 4 s of RGB
+    arrs, info = policy_window.episode_window_arrays(g, 0, _hist_spec())
+    assert arrs["sampled"].shape == (60,) and not arrs["sampled"].any()
+    assert info["sampled_error"]
+
+
+def test_action_ticks_single_rgb_frame():
+    ticks = policy_window.action_ticks(np.arange(10) * 0.005, np.array([0.0]), horizon=4, rgb_stride=1)
+    assert ticks.shape == (1, 4)

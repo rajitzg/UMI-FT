@@ -73,3 +73,17 @@ def test_stale_when_episode_missing(tmp_path):
     fs.set(ref, idx.summary(ref)["fingerprint"], flag="keep")
     idx2 = _index(tmp_path, n_eps=2)  # zarr rebuilt with fewer episodes
     assert fs.orphans(idx2) == ["dagger/2"]
+
+
+def test_note_only_edit_keeps_stale_flag_stale(tmp_path):
+    idx = _index(tmp_path)
+    ref = idx.get("dagger/1")
+    fs = FlagStore(tmp_path / "f.json")
+    fp = idx.summary(ref)["fingerprint"]
+    fs.set(ref, fp, flag="keep")
+    new_fp = dict(fp, n_rgb=fp["n_rgb"] + 5)  # zarr rebuilt underneath
+    fs.set(ref, new_fp, note="check this")
+    st = fs.status(ref, new_fp)
+    assert st["stale"] is True and st["note"] == "check this"
+    fs.set(ref, new_fp, flag="keep")  # an explicit re-decision refreshes it
+    assert fs.status(ref, new_fp)["stale"] is False
