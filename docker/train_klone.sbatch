@@ -45,6 +45,12 @@ APPTAINER_ARGS=(
   --env HYDRA_FULL_ERROR=1
 )
 
+# Optional: overlay newer PyriteML code over the (stale) copy baked into the SIF, e.g.
+#   PYRITE_OVERLAY=/gscratch/scrubbed/rzghosh/UMI-FT/PyriteML sbatch ...
+if [[ -n "${PYRITE_OVERLAY:-}" ]]; then
+  APPTAINER_ARGS+=(--bind "${PYRITE_OVERLAY}:/opt/umift/PyriteML")
+fi
+
 if [[ -f "${WANDB_ENV}" ]]; then
   APPTAINER_ARGS+=(--env-file "${WANDB_ENV}")
 else

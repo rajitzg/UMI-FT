@@ -6,6 +6,8 @@
 #   umift_ss_v2_abs_obs.yaml         obs poses absolute instead of relative
 #   umift_ss_v2_abs_obs_action.yaml  obs AND actions absolute (fixture frame)
 #   umift_ss_v2_no_scan.yaml         no scan_heatmap input (collect without laser pauses)
+#   umift_ss_v2_elapsed_time.yaml    + elapsed_time_0 (seconds since policy start)
+#   umift_ss_v2_no_scan_elapsed_time.yaml  both of the above
 # Everything is driven by shape_meta, so it travels with the checkpoint.
 name: UMIFT-SS-V2
 
@@ -290,3 +292,4 @@ dataset:
   # drop queries near corrupt tag poses (|x|,|y|,|z| > 2 m in the fixture frame, e.g. episode_27
   # in stringer_scanner_v2). Required for absolute-pose variants; harmless otherwise.
   max_abs_pos_m: 2.0
+  dagger_frac: null # e.g. 0.2 = 20% of each batch from episodes tagged source=dagger

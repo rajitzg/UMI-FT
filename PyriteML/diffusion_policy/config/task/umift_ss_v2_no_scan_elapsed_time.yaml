@@ -1,0 +1,9 @@
+# No scan input (see umift_ss_v2_no_scan.yaml) plus elapsed_time_0
+# (see umift_ss_v2_elapsed_time.yaml).
+defaults:
+  - umift_ss_v2_elapsed_time
+  - _self_
+
+name: UMIFT-SS-V2-NO-SCAN-ELAPSED-TIME
+
+drop_scan_inputs: true

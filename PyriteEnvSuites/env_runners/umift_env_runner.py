@@ -23,6 +23,10 @@ from PyriteConfig.tasks.umift.workcell_frames import (
 )
 from PyriteUtility.common import GracefulKiller
 from PyriteUtility.planning_control.mpc import ModelPredictiveController
+from PyriteUtility.planning_control.policy_clock import (
+    PolicyElapsedClock,
+    scale_obs_windows_by_slow_down,
+)
 from PyriteUtility.planning_control.scan_encoder_monitor import (
     ScanEncoderMonitor,
     render_scan_panel,
@@ -296,6 +300,52 @@ def run_compare_pointcloud(
             flush=True,
         )
     return result
+
+
+def run_dagger_park(*, env, control_para: dict) -> None:
+    """Park the right arm, wait while the operator collects DAgger data, then
+    restore the arm to where the episode stopped and resume RTDE control.
+    """
+    keyence_ws = Path(control_para["keyence_ws"])
+    py = str(control_para["keyence_python"])
+    script = str(keyence_ws / "scripts" / "right_park.py")
+
+    def _run(*args: str) -> subprocess.CompletedProcess:
+        proc = subprocess.run(
+            [py, script, *args],
+            cwd=str(keyence_ws),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        print(proc.stdout)
+        if proc.stderr:
+            print(proc.stderr, flush=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"right_park.py {args[0]} failed ({proc.returncode})")
+        return proc
+
+    # Read before pausing: this is the pose we come back to.
+    return_q = read_robot_joints_via_rtde(
+        Path(py), str(control_para["layup_eval_right_ip"])
+    )
+    joints_csv = ",".join(f"{q:.9g}" for q in return_q)
+    print(f"[dagger] Saved return joints: {joints_csv}")
+
+    if not env.pause_rtde_control():
+        raise RuntimeError("pause_rtde_control failed")
+    try:
+        lift = _parse_tagged_line(_run("park").stdout, "RIGHT_LIFT_JOINTS")
+        lift_args = [f"--lift-joints={lift}"] if lift and lift != "none" else []
+        input(
+            "[dagger] Right arm parked. Collect DAgger data with the data "
+            "collector, then press Enter to return to the saved pose."
+        )
+        _run("return", f"--joints={joints_csv}", *lift_args)
+        print("[dagger] Returned to saved pose.")
+    finally:
+        if not env.resume_rtde_control():
+            print("[dagger] WARNING: resume_rtde_control failed")
 
 
 def run_layup_scan_eval(
@@ -680,10 +730,17 @@ def main():
     control_para = {
         # Training policy rate = 10 Hz; iPhone/GoPro legacy path uses 0.0167 (~60 Hz).
         "raw_time_step_s": 1.0 / 15.0,
-        "slow_down_factor": 2,  # slow down policy execution by this factor
+        "slow_down_factor": 1.5,  # slow down policy execution by this factor
+        # Stretch every obs history window (rgb/depth/pose/wrench strides) by
+        # slow_down_factor so the policy sees the same DEMO-time history span it was
+        # trained on. False reproduces the old behavior (windows span the training
+        # wall-clock time, so motion inside them looks slow_down_factor x slower).
+        "scale_obs_windows_by_slow_down": True,
+        # TEST: extra multiplier on obs history span (1.0 = off, 1.5 = 1.5x longer).
+        "history_window_stretch": 1.5,
         # Must be <= the loaded checkpoint's sparse_action_horizon (epoch=0170 is 12;
         # new 10 Hz yaml uses 32). With ensemble on, smaller => more overlap.
-        "sparse_execution_horizon": 16, # first step is at t=0, so this should be >1
+        "sparse_execution_horizon": 6, # first step is at t=0, so this should be >1
         # Zero-added-latency temporal ensembling of overlapping action chunks.
         # Lower sparse_execution_horizon with this on increases overlap/smoothing.
         "enable_ensemble_chunking": True,
@@ -700,9 +757,9 @@ def main():
         "test_nominal_target_stiffness": -1,  # -1, for a 'no force case'. 1500, for a quick test without force.
         "fix_orientation": False,
         "enable_control_log": True,
-        "log_policy_vision": True,
+        "log_policy_vision": False,
         # Per-rollout MP4s under <control log>/cameras: wrist D405 + center Orbbec.
-        "record_rollout_cameras": True,
+        "record_rollout_cameras": False,
         "orbbec_v4l_device": DEFAULT_ORBBEC_V4L,
         "pausing_mode": False,  # matplotlib debug only; independent of logging
         "device": "cuda",
@@ -710,7 +767,7 @@ def main():
         "keyence_ws": "/home/boeing/keyence_scan_ws",
         "keyence_python": "/home/boeing/keyence_scan_ws/.venv/bin/python",
         # Reference / "low" surface PLY for compare_pointcloud_distance --low
-        "layup_eval_low_ply": "/mnt/data/boeing/scans/scan_20261011_161311/merged.ply",
+        "layup_eval_low_ply": "/mnt/data/boeing/scans/scan_20261111_184859/merged.ply",
         # Right-arm IP for capturing episode-start joints (RTDE receive).
         "layup_eval_right_ip": "192.168.1.2",
         # Periodic mid-episode Keyence layup scan interrupts
@@ -720,7 +777,7 @@ def main():
         # seconds during an episode. Each call cold-starts run_layup_scan.py
         # (no persistent daemon) and resumes control only after the new
         # scan_heatmap_0 has been loaded, since the policy conditions on it.
-        "periodic_scan_enabled": True,
+        "periodic_scan_enabled": False,
         "periodic_scan_interval_s": 60.0,
         "periodic_scan_timeout_s": 90.0,
         "periodic_scan_compare_timeout_s": 30.0,
@@ -738,7 +795,7 @@ def main():
             "socket_ip": "192.168.2.18",
             "ports": [5555],
         },
-        "ckpt_path": "/stringer_scanner_v2/flatten_crop/epoch=0030-train_loss=0.020.ckpt",
+        "ckpt_path": "/stringer_v3.5/hist/dagger_123/0.35/epoch=0110-train_loss=0.014.ckpt",
         "hardware_config_path": hardware_config_folder_path
         + "/ur5e_wrist_ft.yaml",
         "audio_device_id": [5],  # only needed for audio input
@@ -844,6 +901,25 @@ def main():
     # Both rgb and ultrawide stream at 60Hz, so we'll just use either one. rgb, if it exists.
     rgb_key = next(k for k in vision_key if k in ["rgb_0", "ultrawide_0"])
 
+    # Obs history windows are in demo time; the robot runs slow_down_factor x slower.
+    # Extra TEST knob: stretch history span beyond what training saw (policy sees a longer,
+    # sparser past). Rounded to int ds, so small ds (e.g. 1) snaps coarsely: check printout.
+    history_stretch = float(control_para.get("history_window_stretch", 1.0))
+    window_scale = (
+        control_para["slow_down_factor"]
+        if control_para["scale_obs_windows_by_slow_down"]
+        else 1.0
+    ) * history_stretch
+    if window_scale != 1.0:
+        OmegaConf.set_struct(shape_meta["sample"]["obs"]["sparse"], False)
+        for key, (old_ds, new_ds) in scale_obs_windows_by_slow_down(
+            shape_meta["sample"]["obs"]["sparse"], window_scale
+        ).items():
+            print(
+                f"[slow_down] {key} down_sample_steps: {old_ds} -> {new_ds} "
+                f"(x{window_scale}, history_stretch={history_stretch})"
+            )
+
     # ultrawide also streams at 60Hz so no mapping is needed during inference. Just use the same downsampling and horizon.
     rgb_query_size = (
         shape_meta["sample"]["obs"]["sparse"][rgb_key]["horizon"] - 1
@@ -947,6 +1023,23 @@ def main():
         "sparse": query_sizes_sparse,
     }
 
+    # The ManipServer ring buffers must hold the (possibly slow-down-stretched) windows.
+    with open(pipeline_para["hardware_config_path"]) as _f:
+        _hw = yaml.safe_load(_f)
+    for _name, _buf_key in (
+        ("ts_pose_fb", "robot_buffer_size"),
+        ("wrench", "wrench_buffer_size"),
+        ("rgb", "rgb_buffer_size"),
+    ):
+        _need = query_sizes_sparse.get(_name)
+        _have = _hw.get(_buf_key)
+        if _need and _have and _need > _have:
+            raise ValueError(
+                f"Obs window for '{_name}' needs {_need} samples but "
+                f"{_buf_key}={_have} in {pipeline_para['hardware_config_path']}. "
+                "Raise the buffer, or set control_para['scale_obs_windows_by_slow_down']=False."
+            )
+
     if (
         control_para["test_nominal_target"]
         and control_para["test_nominal_target_stiffness"] < 0
@@ -1003,6 +1096,19 @@ def main():
     periodic_scan_enabled = (
         bool(control_para.get("periodic_scan_enabled", False)) and policy_uses_scan
     )
+    # Policies with an elapsed_time_0 input were trained on demo-time seconds since the
+    # policy start. The clock rescales wall time by slow_down_factor and adds scan
+    # pauses back unscaled (see PolicyElapsedClock).
+    has_elapsed_time = "elapsed_time_0" in shape_meta["sample"]["obs"]["sparse"]
+    elapsed_clock = PolicyElapsedClock(control_para["slow_down_factor"])
+    if has_elapsed_time:
+        assert (
+            shape_meta["sample"]["obs"]["sparse"]["elapsed_time_0"]["horizon"] == 1
+        ), "elapsed_time_0 must have horizon 1"
+        print(
+            "[elapsed-time] policy takes elapsed_time_0; demo-time scale = 1/"
+            f"{control_para['slow_down_factor']}"
+        )
     if control_para.get("periodic_scan_enabled", False) and not policy_uses_scan:
         print(
             "[layup] periodic scans off: this checkpoint has no scan_heatmap input"
@@ -1173,6 +1279,8 @@ def main():
     #########################################
     # main loop starts
     #########################################
+    resume_elapsed_s = 0.0  # >0 only after a DAgger park ('d'): continue the demo clock
+    last_elapsed_s = 0.0
     while True:
         printOrNot(vbs_h1, "New episode. Episode ID: ", episode_id)
         input("Press Enter to start the episode.")
@@ -1237,6 +1345,8 @@ def main():
             )
 
         episode_initial_time_s = env.current_hardware_time_s
+        elapsed_clock.start(episode_initial_time_s, offset_s=resume_elapsed_s)
+        resume_elapsed_s = 0.0
         last_scan_time_s = -float("inf")
         killer = GracefulKiller()
         while not killer.kill_now:
@@ -1276,7 +1386,10 @@ def main():
                 # the horizon clock (used below for execution-duration sleep
                 # math) and the periodic-scan clock (measured from when this
                 # scan actually finished, not when it was due).
-                horizon_initial_time_s = env.current_hardware_time_s
+                scan_end_time_s = env.current_hardware_time_s
+                # The demo clock kept running during scan pauses in the training data.
+                elapsed_clock.add_pause(scan_end_time_s - horizon_initial_time_s)
+                horizon_initial_time_s = scan_end_time_s
                 last_scan_time_s = horizon_initial_time_s
 
             obs_raw = env.get_observation_from_buffer()
@@ -1324,6 +1437,13 @@ def main():
             # import pdb; pdb.set_trace()
 
             raw_to_obs_inference(obs_raw, obs_task, shape_meta)
+
+            if has_elapsed_time:
+                elapsed_s = elapsed_clock.elapsed_s(horizon_initial_time_s)
+                obs_task["obs"]["elapsed_time_0"] = np.array(
+                    [[elapsed_s]], dtype=np.float32
+                )
+                printOrNot(vbs_h2, f"elapsed_time_0 = {elapsed_s:.2f}s (demo time)")
 
             # hacks for UMIFT
             for id in id_list:
@@ -1711,6 +1831,8 @@ def main():
                     )
                     break
 
+        if has_elapsed_time:
+            last_elapsed_s = elapsed_clock.elapsed_s(env.current_hardware_time_s)
         if scan_monitor is not None:
             print(scan_monitor.summary())
         printOrNot(vbs_h1, "End of episode.")
@@ -1741,6 +1863,10 @@ def main():
         print(
             "     s: layup scan eval then quit "
             "(wait for compare; save results next to ckpt)."
+        )
+        print(
+            "     d: park right arm for DAgger collection, then return here "
+            "and continue (next episode resumes from this pose)."
         )
         print("     b: reset to default pose, then quit the program.")
         print("     others: quit the program.")
@@ -1785,6 +1911,13 @@ def main():
             home_to_pose7(
                 env, id_list, ts_pose_initial, duration_s=5.0, wait=False
             )
+        elif c == "d":
+            try:
+                run_dagger_park(env=env, control_para=control_para)
+                resume_elapsed_s = last_elapsed_s
+            except Exception as exc:
+                print(f"[dagger] FAILED: {exc}")
+                print("Arm may not be at the saved pose; check before continuing.")
         elif c == "c":
             pass
         else:

@@ -1,0 +1,495 @@
+{
+ "shape_meta": {
+  "pose_frames": {
+   "obs": "relative",
+   "action": "relative"
+  },
+  "id_list": [
+   0
+  ],
+  "raw": {
+   "rgb_0": {
+    "shape": [
+     3,
+     224,
+     224
+    ],
+    "type": "rgb"
+   },
+   "depth_0": {
+    "shape": [
+     3,
+     224,
+     224
+    ],
+    "type": "rgb"
+   },
+   "ts_pose_fb_0": {
+    "shape": [
+     7
+    ],
+    "type": "low_dim"
+   },
+   "ts_pose_virtual_target_0": {
+    "shape": [
+     7
+    ],
+    "type": "low_dim"
+   },
+   "gripper_0": {
+    "shape": [
+     1
+    ],
+    "type": "low_dim"
+   },
+   "stiffness_0": {
+    "shape": [
+     1
+    ],
+    "type": "low_dim"
+   },
+   "wrench_left_0": {
+    "shape": [
+     6
+    ],
+    "type": "low_dim"
+   },
+   "wrench_right_0": {
+    "shape": [
+     6
+    ],
+    "type": "low_dim"
+   },
+   "rgb_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "ultrawide_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "depth_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "robot_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "gripper_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "wrench_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "map_to_uw_idx_0": {
+    "shape": [
+     1
+    ],
+    "type": "index"
+   },
+   "map_to_d_idx_0": {
+    "shape": [
+     1
+    ],
+    "type": "index"
+   }
+  },
+  "obs": {
+   "rgb_0": {
+    "shape": [
+     3,
+     224,
+     224
+    ],
+    "type": "rgb"
+   },
+   "depth_0": {
+    "shape": [
+     3,
+     224,
+     224
+    ],
+    "type": "rgb",
+    "clip": 0.5
+   },
+   "robot0_eef_pos": {
+    "shape": [
+     3
+    ],
+    "type": "low_dim"
+   },
+   "robot0_eef_rot_axis_angle": {
+    "shape": [
+     6
+    ],
+    "type": "low_dim",
+    "rotation_rep": "rotation_6d"
+   },
+   "robot0_eef_wrench_left": {
+    "shape": [
+     6
+    ],
+    "type": "low_dim"
+   },
+   "robot0_eef_wrench_right": {
+    "shape": [
+     6
+    ],
+    "type": "low_dim"
+   },
+   "rgb_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "ultrawide_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "depth_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "robot_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "wrench_time_stamps_0": {
+    "shape": [
+     1
+    ],
+    "type": "timestamp"
+   },
+   "map_to_uw_idx_0": {
+    "shape": [
+     1
+    ],
+    "type": "index"
+   },
+   "map_to_d_idx_0": {
+    "shape": [
+     1
+    ],
+    "type": "index"
+   }
+  },
+  "action": {
+   "shape": [
+    21
+   ],
+   "rotation_rep": "rotation_6d"
+  },
+  "sample": {
+   "obs": {
+    "sparse": {
+     "rgb_0": {
+      "horizon": 10,
+      "down_sample_steps": 5
+     },
+     "depth_0": {
+      "horizon": 10,
+      "down_sample_steps": 5
+     },
+     "robot0_eef_pos": {
+      "horizon": 50,
+      "down_sample_steps": 16
+     },
+     "robot0_eef_rot_axis_angle": {
+      "horizon": 50,
+      "down_sample_steps": 16
+     },
+     "robot0_eef_wrench_left": {
+      "horizon": 64,
+      "down_sample_steps": 2
+     },
+     "robot0_eef_wrench_right": {
+      "horizon": 64,
+      "down_sample_steps": 2
+     }
+    }
+   },
+   "action": {
+    "sparse": {
+     "horizon": 24,
+     "down_sample_steps": 1
+    }
+   },
+   "training_duration_per_sparse_query": 5.0
+  }
+ },
+ "dataset": {
+  "shape_meta": {
+   "pose_frames": {
+    "obs": "relative",
+    "action": "relative"
+   },
+   "id_list": [
+    0
+   ],
+   "raw": {
+    "rgb_0": {
+     "shape": [
+      3,
+      224,
+      224
+     ],
+     "type": "rgb"
+    },
+    "depth_0": {
+     "shape": [
+      3,
+      224,
+      224
+     ],
+     "type": "rgb"
+    },
+    "ts_pose_fb_0": {
+     "shape": [
+      7
+     ],
+     "type": "low_dim"
+    },
+    "ts_pose_virtual_target_0": {
+     "shape": [
+      7
+     ],
+     "type": "low_dim"
+    },
+    "gripper_0": {
+     "shape": [
+      1
+     ],
+     "type": "low_dim"
+    },
+    "stiffness_0": {
+     "shape": [
+      1
+     ],
+     "type": "low_dim"
+    },
+    "wrench_left_0": {
+     "shape": [
+      6
+     ],
+     "type": "low_dim"
+    },
+    "wrench_right_0": {
+     "shape": [
+      6
+     ],
+     "type": "low_dim"
+    },
+    "rgb_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "ultrawide_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "depth_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "robot_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "gripper_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "wrench_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "map_to_uw_idx_0": {
+     "shape": [
+      1
+     ],
+     "type": "index"
+    },
+    "map_to_d_idx_0": {
+     "shape": [
+      1
+     ],
+     "type": "index"
+    }
+   },
+   "obs": {
+    "rgb_0": {
+     "shape": [
+      3,
+      224,
+      224
+     ],
+     "type": "rgb"
+    },
+    "depth_0": {
+     "shape": [
+      3,
+      224,
+      224
+     ],
+     "type": "rgb",
+     "clip": 0.5
+    },
+    "robot0_eef_pos": {
+     "shape": [
+      3
+     ],
+     "type": "low_dim"
+    },
+    "robot0_eef_rot_axis_angle": {
+     "shape": [
+      6
+     ],
+     "type": "low_dim",
+     "rotation_rep": "rotation_6d"
+    },
+    "robot0_eef_wrench_left": {
+     "shape": [
+      6
+     ],
+     "type": "low_dim"
+    },
+    "robot0_eef_wrench_right": {
+     "shape": [
+      6
+     ],
+     "type": "low_dim"
+    },
+    "rgb_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "ultrawide_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "depth_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "robot_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "wrench_time_stamps_0": {
+     "shape": [
+      1
+     ],
+     "type": "timestamp"
+    },
+    "map_to_uw_idx_0": {
+     "shape": [
+      1
+     ],
+     "type": "index"
+    },
+    "map_to_d_idx_0": {
+     "shape": [
+      1
+     ],
+     "type": "index"
+    }
+   },
+   "action": {
+    "shape": [
+     21
+    ],
+    "rotation_rep": "rotation_6d"
+   },
+   "sample": {
+    "obs": {
+     "sparse": {
+      "rgb_0": {
+       "horizon": 10,
+       "down_sample_steps": 5
+      },
+      "depth_0": {
+       "horizon": 10,
+       "down_sample_steps": 5
+      },
+      "robot0_eef_pos": {
+       "horizon": 50,
+       "down_sample_steps": 16
+      },
+      "robot0_eef_rot_axis_angle": {
+       "horizon": 50,
+       "down_sample_steps": 16
+      },
+      "robot0_eef_wrench_left": {
+       "horizon": 64,
+       "down_sample_steps": 2
+      },
+      "robot0_eef_wrench_right": {
+       "horizon": 64,
+       "down_sample_steps": 2
+      }
+     }
+    },
+    "action": {
+     "sparse": {
+      "horizon": 24,
+      "down_sample_steps": 1
+     }
+    },
+    "training_duration_per_sparse_query": 5.0
+   }
+  },
+  "dataset_path": "/data/dagger_123.zarr",
+  "sparse_query_frequency_down_sample_steps": 2,
+  "action_padding": true,
+  "temporally_independent_normalization": false,
+  "seed": 42,
+  "val_ratio": 0.1,
+  "normalize_wrench": true,
+  "action_gap_threshold_mult": 3.0,
+  "scan_pre_first_fill": "zeros",
+  "max_abs_pos_m": 2.0,
+  "dagger_frac": 0.35
+ }
+}

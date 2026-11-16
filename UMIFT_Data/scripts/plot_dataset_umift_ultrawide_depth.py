@@ -34,7 +34,7 @@ if "PYRITE_DATASET_FOLDERS" not in os.environ:
 dataset_folder_path = os.environ.get("PYRITE_DATASET_FOLDERS")
 dataset_path = os.environ.get(
     "UMIFT_DATASET_PATH",
-    "/mnt/data/umidata/ft/datasets/stringer_v3.5/acp_replay_buffer.zarr",
+    "/mnt/data/umidata/ft/datasets/stringer_v3.5_dagger_2/acp_replay_buffer.zarr",
 )
 
 print("Loading dataset from: ", dataset_path)
@@ -43,7 +43,7 @@ print("Loading dataset from: ", dataset_path)
 buffer = zarr.open(dataset_path, mode="r+")
 
 # select which episode to visualize    
-ep = "episode_41"
+ep = "episode_7"
 print("Loading episode: ", ep)
 print(buffer.tree())
 

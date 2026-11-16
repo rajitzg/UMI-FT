@@ -58,6 +58,7 @@ class UmiFTDataset(BaseImageDataset):
         action_gap_threshold_mult: float = 3.0,
         scan_pre_first_fill: str = "first",
         max_abs_pos_m: float = None,
+        dagger_frac: float = None,
     ):
         # scan_pre_first_fill: "first" (legacy: use scan 0 before the first scan completes)
         #   or "zeros" (matches the robot runner, which feeds zeros until the first scan).
@@ -150,6 +151,18 @@ class UmiFTDataset(BaseImageDataset):
         self.val_mask = val_mask
         self.action_padding = action_padding
         self.sampler = sampler
+        # dagger_frac: target share of each training batch drawn from episodes tagged
+        # attrs["source"]=="dagger" by the combine script. None = uniform (old behavior).
+        self.sample_weights = None
+        if dagger_frac is not None:
+            grp = zarr.open(dataset_path, mode="r")["data"]
+            is_dagger = np.array(
+                [grp[f"episode_{e}"].attrs.get("source") == "dagger" for e, _ in sampler.indices]
+            )
+            n_d, n_o = int(is_dagger.sum()), int((~is_dagger).sum())
+            assert n_d > 0 and n_o > 0, f"dagger_frac set but got {n_d} dagger / {n_o} original train samples"
+            self.sample_weights = np.where(is_dagger, dagger_frac / n_d, (1 - dagger_frac) / n_o)
+            print(f"[UmiFTDataset] dagger_frac={dagger_frac}: {n_d} dagger / {n_o} original samples")
         self.action_gap_threshold_mult = action_gap_threshold_mult
         self.temporally_independent_normalization = temporally_independent_normalization
         self.threadpool_limits_is_applied = False
@@ -396,6 +409,8 @@ class UmiFTDataset(BaseImageDataset):
                     else:
                         this_normalizer = get_identity_normalizer_from_stat(stat)
                 elif "gripper" in key:
+                    this_normalizer = get_range_normalizer_from_stat(stat)
+                elif "elapsed_time" in key:
                     this_normalizer = get_range_normalizer_from_stat(stat)
                 else:
                     raise RuntimeError("unsupported")

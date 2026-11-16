@@ -211,6 +211,24 @@ def filter_rgb_ids_near_bad_poses(
     return rgb_ids[keep], int((~keep).sum())
 
 
+def is_elapsed_time_key(key: str) -> bool:
+    return key.startswith("elapsed_time_")
+
+
+def elapsed_time_since_policy_start(
+    query_time_s: float, first_rgb_time_s: float, start_pad_s: float
+) -> float:
+    """Demo seconds between the policy start and a training query (never negative).
+
+    The policy starts where the real recording starts: ``start_pad_s`` after the first
+    timestamp, because the converters prepend that much frozen start state
+    (``pad_episode_start``). Queries inside the pad sit at 0, like the first inference
+    query. Use ``start_pad_s=0`` for datasets built without padding. The inference side
+    is ``PyriteUtility.planning_control.policy_clock.PolicyElapsedClock``.
+    """
+    return max(0.0, float(query_time_s) - float(first_rgb_time_s) - float(start_pad_s))
+
+
 def zero_fill_scan_heatmap(declared_shape, n_frames: int) -> np.ndarray:
     """Build a zero placeholder for scan_heatmap_{id} with `n_frames` steps.
 
@@ -938,6 +956,26 @@ class SequenceSamplerUmiFT:
         sparse_obs_unprocessed = dict()
         sparse_action_unprocessed = []
         for key, attr in self.shape_meta["sample"]["obs"]["sparse"].items():
+            if is_elapsed_time_key(key):
+                # Derived from the query time, not stored in the dataset.
+                assert attr["horizon"] == 1, (
+                    f"{key}: only horizon=1 is supported (inference supplies the "
+                    "current elapsed time only)"
+                )
+                rgb_times = np.squeeze(data_episode["obs"]["rgb_time_stamps_0"])
+                sparse_obs_unprocessed[key] = np.array(
+                    [
+                        [
+                            elapsed_time_since_policy_start(
+                                query_time,
+                                rgb_times[0],
+                                self.shape_meta["obs"][key].get("start_pad_s", 0.0),
+                            )
+                        ]
+                    ],
+                    dtype=np.float32,
+                )
+                continue
             input_arr = data_episode["obs"][key]
             this_horizon = attr["horizon"]
             this_downsample_steps = attr["down_sample_steps"]
