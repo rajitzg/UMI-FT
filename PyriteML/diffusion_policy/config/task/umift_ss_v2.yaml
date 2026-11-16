@@ -292,3 +292,4 @@ dataset:
   # drop queries near corrupt tag poses (|x|,|y|,|z| > 2 m in the fixture frame, e.g. episode_27
   # in stringer_scanner_v2). Required for absolute-pose variants; harmless otherwise.
   max_abs_pos_m: 2.0
+  dagger_frac: null # e.g. 0.2 = 20% of each batch from episodes tagged source=dagger

@@ -24,11 +24,16 @@ class PolicyElapsedClock:
         self.slow_down_factor = slow_down_factor
         self._start_s = None
         self._paused_s = 0.0
+        self._offset_s = 0.0
 
-    def start(self, now_s: float) -> None:
-        """Mark policy start (the first query of an episode). Clears recorded pauses."""
+    def start(self, now_s: float, offset_s: float = 0.0) -> None:
+        """Mark policy start (the first query of an episode). Clears recorded pauses.
+
+        ``offset_s``: demo time already elapsed (resuming an interrupted episode).
+        """
         self._start_s = float(now_s)
         self._paused_s = 0.0
+        self._offset_s = float(offset_s)
 
     def add_pause(self, duration_s: float) -> None:
         """Record wall time during which the robot was stopped for a scan."""
@@ -46,7 +51,7 @@ class PolicyElapsedClock:
             raise RuntimeError("PolicyElapsedClock.elapsed_s() called before start()")
         wall = float(now_s) - self._start_s
         moving = max(0.0, wall - self._paused_s)
-        return moving / self.slow_down_factor + self._paused_s
+        return moving / self.slow_down_factor + self._paused_s + self._offset_s
 
 
 def scale_obs_windows_by_slow_down(sparse_obs_meta, slow_down_factor: float) -> dict:

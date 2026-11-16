@@ -117,3 +117,95 @@ def test_naive_concat_meta_would_be_wrong():
         for L in lens:
             MODULE._append_cumulative(rebuilt, L)
     assert rebuilt == [100, 250, 270, 291]
+
+
+# --- per-input drops + root attrs (episode review tool export) ---
+
+import pytest
+
+
+def _sources(out):
+    root = zarr.open(str(out), mode="r")
+    eps = MODULE.list_episodes_numeric(root["data"])
+    return [root["data"][e].attrs.get("source") for e in eps]
+
+
+def test_drop_by_input_only_affects_that_input(tmp_path):
+    a, b = tmp_path / "a.zarr", tmp_path / "b.zarr"
+    _write_toy_zarr(a, 3, 10)
+    _write_toy_zarr(b, 3, 20)
+    out = tmp_path / "out.zarr"
+    s = MODULE.merge_umift_zarr_datasets(
+        [a], out, dagger_inputs=[b], drop_episodes_by_input={str(b): [1]}
+    )
+    srcs = [(r["source_zarr"], r["source_episode"]) for r in s["source_map"]]
+    assert (str(a.resolve()), "episode_1") in srcs
+    assert (str(b.resolve()), "episode_1") not in srcs
+    assert len(srcs) == 5
+    assert _sources(out) == ["original"] * 3 + ["dagger"] * 2
+    MODULE.validate_merged_zarr(out)
+
+
+def test_drop_by_input_base_only_tags_original(tmp_path):
+    a, b = tmp_path / "a.zarr", tmp_path / "b.zarr"
+    _write_toy_zarr(a, 2, 10)
+    _write_toy_zarr(b, 2, 20)
+    out = tmp_path / "out.zarr"
+    MODULE.merge_umift_zarr_datasets(
+        [a], out, dagger_inputs=[b], drop_episodes_by_input={str(b): [0, 1]}
+    )
+    assert _sources(out) == ["original", "original"]
+
+
+def test_drop_by_input_unknown_index_raises(tmp_path):
+    a = tmp_path / "a.zarr"
+    _write_toy_zarr(a, 3, 10)
+    with pytest.raises(KeyError):
+        MODULE.merge_umift_zarr_datasets(
+            [a], tmp_path / "out.zarr", drop_episodes_by_input={str(a): [7]}
+        )
+
+
+def test_drop_by_input_unknown_path_raises(tmp_path):
+    a = tmp_path / "a.zarr"
+    _write_toy_zarr(a, 1, 10)
+    with pytest.raises(ValueError):
+        MODULE.merge_umift_zarr_datasets(
+            [a], tmp_path / "out.zarr", drop_episodes_by_input={str(tmp_path / "x.zarr"): [0]}
+        )
+
+
+def test_root_attrs_kept_when_inputs_agree(tmp_path):
+    a, b = tmp_path / "a.zarr", tmp_path / "b.zarr"
+    _write_toy_zarr(a, 1, 10)
+    _write_toy_zarr(b, 1, 20)
+    for p in (a, b):
+        zarr.open(str(p), mode="r+").attrs["start_pad_seconds"] = 5.0
+    out = tmp_path / "out.zarr"
+    MODULE.merge_umift_zarr_datasets([a, b], out)
+    assert zarr.open(str(out), mode="r").attrs["start_pad_seconds"] == 5.0
+
+
+def test_root_attrs_dropped_when_inputs_disagree(tmp_path, capsys):
+    a, b = tmp_path / "a.zarr", tmp_path / "b.zarr"
+    _write_toy_zarr(a, 1, 10)
+    _write_toy_zarr(b, 1, 20)
+    zarr.open(str(a), mode="r+").attrs["start_pad_seconds"] = 5.0
+    zarr.open(str(b), mode="r+").attrs["start_pad_seconds"] = 0.0
+    out = tmp_path / "out.zarr"
+    MODULE.merge_umift_zarr_datasets([a, b], out)
+    assert "start_pad_seconds" not in zarr.open(str(out), mode="r").attrs
+    assert "start_pad_seconds" in capsys.readouterr().out
+
+
+def test_write_source_map_false_skips_json(tmp_path):
+    a = tmp_path / "a.zarr"
+    _write_toy_zarr(a, 1, 10)
+    MODULE.merge_umift_zarr_datasets([a], tmp_path / "out.zarr", write_source_map=False)
+    assert not (tmp_path / "episode_source_map.json").exists()
+
+
+def test_cli_drop_by_input_parsing():
+    assert MODULE._parse_drop_by_input(["/x/b.zarr:3,7", "/x/b.zarr:9"]) == {"/x/b.zarr": [3, 7, 9]}
+    with pytest.raises(ValueError):
+        MODULE._parse_drop_by_input(["nocolon"])

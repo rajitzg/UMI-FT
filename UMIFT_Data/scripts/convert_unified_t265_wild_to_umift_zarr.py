@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import zarr
@@ -492,6 +492,7 @@ def convert(
     pose_source: str = "auto",
     resample_10hz: bool = False,
     start_pad_seconds: float = 5.0,
+    dagger_pattern: Optional[str] = None,
 ) -> None:
     _ensure_zarr_v2()
 
@@ -528,6 +529,9 @@ def convert(
         conventions_used.append(frame_conv)
         ep_group = data_group.create_group(f"episode_{ep_idx}")
         ep_group.attrs["start_pad_seconds"] = float(start_pad_seconds)
+        # "dagger" if the unified zarr name contains --dagger-pattern (see UmiFTDataset dagger_frac)
+        is_dagger = bool(dagger_pattern) and dagger_pattern in unified_path.name
+        ep_group.attrs["source"] = "dagger" if is_dagger else "original"
 
         for key, value in ep_data.items():
             compressor = image_compressor if key in {"rgb_0", "ultrawide_0"} else numeric_compressor
@@ -677,6 +681,12 @@ def build_parser() -> argparse.ArgumentParser:
             "to disable."
         ),
     )
+    parser.add_argument(
+        "--dagger-pattern",
+        type=str,
+        default=None,
+        help="Episodes whose unified zarr filename contains this substring get attrs['source']='dagger' (others 'original').",
+    )
     return parser
 
 
@@ -695,6 +705,7 @@ def main() -> int:
         pose_source=args.pose_source,
         resample_10hz=args.resample_10hz,
         start_pad_seconds=args.start_pad_seconds,
+        dagger_pattern=args.dagger_pattern,
     )
     return 0
 

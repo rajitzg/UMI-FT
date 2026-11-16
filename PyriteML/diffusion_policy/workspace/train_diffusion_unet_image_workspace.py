@@ -130,7 +130,13 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
         dataset: BaseImageDataset
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset) or isinstance(dataset, BaseDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        dl_cfg = dict(cfg.dataloader)
+        if getattr(dataset, "sample_weights", None) is not None:
+            dl_cfg["shuffle"] = False  # mutually exclusive with sampler
+            dl_cfg["sampler"] = torch.utils.data.WeightedRandomSampler(
+                dataset.sample_weights, num_samples=len(dataset), replacement=True
+            )
+        train_dataloader = DataLoader(dataset, **dl_cfg)
 
         # compute normalizer on the main process and save to disk
         sparse_normalizer_path = os.path.join(self.output_dir, "sparse_normalizer.pkl")

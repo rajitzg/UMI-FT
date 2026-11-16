@@ -40,6 +40,10 @@ Options:
                    Forwarded to the converter's --start-pad-seconds (default: 5.0).
                    Seconds of repeated first-frame data prepended to every
                    episode so training can sample the true reset state. 0 disables.
+  --dagger-pattern SUBSTR
+                   Tag episodes whose unified zarr filename contains SUBSTR as
+                   source=dagger (rest = original). Training then weights them
+                   via task.dataset.dagger_frac.
   -h, --help       Show this help.
 EOF
 }
@@ -54,6 +58,7 @@ shift
 POSE_SOURCE="auto"
 OUTPUT_NAME="acp_replay_buffer.zarr"
 START_PAD_SECONDS=""
+DAGGER_PATTERN=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --pose-source)
@@ -88,6 +93,17 @@ while [[ $# -gt 0 ]]; do
             ;;
         --start-pad-seconds=*)
             START_PAD_SECONDS="${1#*=}"
+            ;;
+        --dagger-pattern)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --dagger-pattern requires a value" >&2
+                exit 1
+            fi
+            DAGGER_PATTERN="$2"
+            shift
+            ;;
+        --dagger-pattern=*)
+            DAGGER_PATTERN="${1#*=}"
             ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -127,6 +143,10 @@ export PYTHONPATH="${WS_ROOT}/UMI-FT/PyriteUtility:${PYTHONPATH:-}"
 CONVERT_EXTRA_ARGS=()
 if [[ -n "${START_PAD_SECONDS}" ]]; then
     CONVERT_EXTRA_ARGS+=(--start-pad-seconds "${START_PAD_SECONDS}")
+fi
+
+if [[ -n "${DAGGER_PATTERN}" ]]; then
+    CONVERT_EXTRA_ARGS+=(--dagger-pattern "${DAGGER_PATTERN}")
 fi
 
 log "Converting unified zarr -> UMIFT schema (conda env: ${CONDA_ENV}, pose-source=${POSE_SOURCE}) ..."
