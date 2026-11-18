@@ -44,6 +44,7 @@ from PyriteEnvSuites.env_runners.rollout_cam_recorder import (
     DEFAULT_ORBBEC_V4L,
     RolloutCamRecorder,
 )
+from PyriteEnvSuites.env_runners.d405_raw_recorder import D405RawRecorder
 
 from PyriteEnvSuites.utils.env_utils import (
     pose9g1_to_traj,
@@ -603,6 +604,13 @@ hardware_config_folder_path = os.environ.get("PYRITE_HARDWARE_CONFIG_FOLDERS")
 control_log_folder_path = os.environ.get("PYRITE_CONTROL_LOG_FOLDERS")
 
 
+def _safe_episode_folder(env) -> Optional[str]:
+    try:
+        return str(env.get_episode_folder())
+    except Exception:
+        return None
+
+
 def resolve_realsense_serial(hardware_config_path: str) -> Optional[str]:
     """Resolve D405 serial for pyrealsense2 (env var overrides yaml)."""
     serial = os.environ.get("UMIFT_REALSENSE_SERIAL")
@@ -761,6 +769,12 @@ def main():
         # Per-rollout MP4s under <control log>/cameras: wrist D405 + center Orbbec.
         "record_rollout_cameras": False,
         "orbbec_v4l_device": DEFAULT_ORBBEC_V4L,
+        # Per-rollout lossless D405 IR pair + native depth (640x480, 15 fps) under
+        # <control log>/d405_raw, in the wand's manifest.json + .raw layout, for offline
+        # stereo (FFS) / defect analysis. ~18 MB/s (~9 GB per 8 min episode); +color ~32 MB/s.
+        # Does not change policy inputs. Skipped automatically if < 10 GB free.
+        "record_d405_raw": False,
+        "record_d405_raw_color": False,
         "pausing_mode": False,  # matplotlib debug only; independent of logging
         "device": "cuda",
         # Post-episode Keyence layup scan eval (menu option "e")
@@ -1070,6 +1084,7 @@ def main():
             depth_clip=depth_clip if depth_query_size is not None else 0.5,
             vision_key=vision_key,
             realsense_serial=realsense_serial,
+            record_d405_raw=bool(control_para.get("record_d405_raw", False)),
         )
     else:
         env = ManipServerUMIFTEnv(
@@ -1310,6 +1325,33 @@ def main():
             except Exception as exc:
                 print(f"[rollout-cam] start failed (continuing without): {exc}")
                 cam_rec = None
+        raw_rec: Optional[D405RawRecorder] = None
+        if control_para.get("record_d405_raw", False) and isinstance(
+            env, ManipServerLayupEnv
+        ):
+            try:
+                info = env.get_d405_stream_info()
+                if "infrared_1" not in info.get("intrinsics", {}):
+                    print("[d405-raw] IR streams are not open; recording depth only")
+                raw_rec = D405RawRecorder(
+                    Path(episode_log_path) / "d405_raw",
+                    record_color=bool(control_para.get("record_d405_raw_color", False)),
+                    device_info=info,
+                    server_clock_s=lambda: env.current_hardware_time_s,
+                    extra_info={
+                        "ckpt_path": pipeline_para.get("ckpt_path"),
+                        "episode_log_path": episode_log_path,
+                        "server_episode_folder": _safe_episode_folder(env),
+                    },
+                )
+                if raw_rec.start():
+                    env.set_d405_raw_frame_sink(raw_rec.push)
+                    printOrNot(vbs_h1, "D405 raw ->", raw_rec.out_dir)
+                else:
+                    raw_rec = None
+            except Exception as exc:
+                print(f"[d405-raw] start failed (continuing without): {exc}")
+                raw_rec = None
         if scan_monitor is not None:
             scan_monitor.reset()
         if control_para["enable_control_log"]:
@@ -1808,6 +1850,8 @@ def main():
             #     "timestamps_s", data=timestamps + action_start_time_s
             # )
             horizon_count += 1
+            if raw_rec is not None:
+                raw_rec.maybe_sync_clock()
 
             if control_para["pausing_mode"]:
                 c = input("Press Enter to start the next horizon. q to quit.")
@@ -1840,6 +1884,19 @@ def main():
         episode_id += 1
 
         env.stop_saving_data()
+
+        if raw_rec is not None:
+            try:
+                env.set_d405_raw_frame_sink(None)
+                raw_info = raw_rec.stop()
+                print(
+                    f"[d405-raw] saved frames={raw_info['frames']} "
+                    f"dropped={raw_info['dropped']} missing={raw_info.get('missing')} "
+                    f"dir={raw_info['dir']}"
+                )
+            except Exception as exc:
+                print(f"[d405-raw] stop failed: {exc}")
+            raw_rec = None
 
         if cam_rec is not None:
             try:

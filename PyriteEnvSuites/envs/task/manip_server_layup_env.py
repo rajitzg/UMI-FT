@@ -102,6 +102,64 @@ def _stack_last_k(
     return np.stack(frames[-k:], axis=0), timestamps[-k:]
 
 
+def _rs_video_frame(frames, stream: str):
+    if stream == "color":
+        return frames.get_color_frame()
+    if stream == "depth":
+        return frames.get_depth_frame()
+    return frames.get_infrared_frame(1 if stream == "infrared_1" else 2)
+
+
+def _frameset_to_raw_dict(frames, host_time_s: float, color: bool, depth: bool, ir: bool) -> Dict[str, Any]:
+    """Full-res frames of one RealSense frameset for D405RawRecorder (arrays alias rs buffers)."""
+    out: Dict[str, Any] = {"host_time_s": host_time_s}
+    streams = (["color"] if color else []) + (["depth"] if depth else []) + (
+        ["infrared_1", "infrared_2"] if ir else []
+    )
+    for s in streams:
+        f = _rs_video_frame(frames, s)
+        if not f:
+            continue
+        out[s] = np.asanyarray(f.get_data())
+        out[f"{s}_rs_timestamp_ms"] = float(f.get_timestamp())
+        out[f"{s}_rs_frame_number"] = int(f.get_frame_number())
+    return out
+
+
+def _describe_profile(profile, serial: str, depth_scale: float) -> Dict[str, Any]:
+    """Serial, depth scale, intrinsics per stream, and extrinsics relative to IR1/depth."""
+    info: Dict[str, Any] = {"serial": serial, "depth_scale": depth_scale, "intrinsics": {}, "extrinsics": {}}
+    dev = profile.get_device()
+    for key in ("name", "firmware_version", "usb_type_descriptor"):
+        try:
+            info[key] = dev.get_info(getattr(rs.camera_info, key))
+        except Exception:
+            pass
+    named = {}
+    for sp in profile.get_streams():
+        vsp = sp.as_video_stream_profile()
+        st = sp.stream_type()
+        name = {rs.stream.color: "color", rs.stream.depth: "depth"}.get(st)
+        if st == rs.stream.infrared:
+            name = f"infrared_{sp.stream_index()}"
+        if name is None:
+            continue
+        named[name] = sp
+        k = vsp.get_intrinsics()
+        info["intrinsics"][name] = {
+            "width": k.width, "height": k.height, "fx": k.fx, "fy": k.fy, "ppx": k.ppx, "ppy": k.ppy,
+            "model": str(k.model), "coeffs": list(k.coeffs), "fps": sp.fps(), "format": str(sp.format()),
+        }
+    ref = "infrared_1" if "infrared_1" in named else ("depth" if "depth" in named else None)
+    if ref is not None:
+        for name, sp in named.items():
+            if name == ref:
+                continue
+            e = named[ref].get_extrinsics_to(sp)
+            info["extrinsics"][f"{ref}_to_{name}"] = {"rotation_colmajor": list(e.rotation), "translation_m": list(e.translation)}
+    return info
+
+
 class D405VisionRingBuffer:
     """Background D405 color+depth capture via a single pyrealsense2 pipeline."""
 
@@ -117,6 +175,7 @@ class D405VisionRingBuffer:
         serial: Optional[str] = None,
         capture_color: bool = True,
         capture_depth: bool = True,
+        capture_ir: bool = False,
     ) -> None:
         if rs is None:
             raise ImportError(
@@ -132,6 +191,8 @@ class D405VisionRingBuffer:
         self.serial = serial
         self.capture_color = capture_color
         self.capture_depth = capture_depth
+        # IR pair (Y8, 640x480) for offline stereo (FFS); only consumed by the raw sink.
+        self.capture_ir = capture_ir
         self._lock = threading.Lock()
         self._rgb_frames: Deque[np.ndarray] = deque(maxlen=self.buffer_size)
         self._rgb_timestamps_s: Deque[float] = deque(maxlen=self.buffer_size)
@@ -143,24 +204,49 @@ class D405VisionRingBuffer:
         self._stop = threading.Event()
         # Optional sink for raw 640x480 RGB (rollout MP4); must be cheap/non-blocking.
         self._raw_rgb_sink: Optional[Callable[[np.ndarray], Any]] = None
+        # Optional sink for full-res raw frames (D405RawRecorder.push): dict with
+        # infrared_1/infrared_2 (uint8 HxW), depth (uint16 HxW), color (uint8 HxWx3),
+        # host_time_s and per-stream rs_timestamp_ms / rs_frame_number. Must not block.
+        self._raw_frame_sink: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self.stream_info: Dict[str, Any] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
 
-        config = rs.config()
-        if self.serial:
-            config.enable_device(self.serial)
-        if self.capture_color:
-            config.enable_stream(
-                rs.stream.color, 640, 480, rs.format.rgb8, self.fps
-            )
-        if self.capture_depth:
-            config.enable_stream(
-                rs.stream.depth, 640, 480, rs.format.z16, self.fps
-            )
+        def make_config():
+            config = rs.config()
+            if self.serial:
+                config.enable_device(self.serial)
+            if self.capture_color:
+                config.enable_stream(
+                    rs.stream.color, 640, 480, rs.format.rgb8, self.fps
+                )
+            if self.capture_depth:
+                config.enable_stream(
+                    rs.stream.depth, 640, 480, rs.format.z16, self.fps
+                )
+            if self.capture_ir:
+                for ir_index in (1, 2):
+                    config.enable_stream(
+                        rs.stream.infrared, ir_index, 640, 480, rs.format.y8, self.fps
+                    )
+            return config
+
         self._pipeline = rs.pipeline()
-        profile = self._pipeline.start(config)
+        try:
+            profile = self._pipeline.start(make_config())
+        except RuntimeError as exc:
+            if not self.capture_ir:
+                raise
+            # Never let raw recording take the policy camera down: retry without IR.
+            print(
+                f"[D405VisionRingBuffer] start with IR streams failed ({exc}); "
+                "retrying WITHOUT IR (raw IR recording disabled)"
+            )
+            self.capture_ir = False
+            self._pipeline = rs.pipeline()
+            profile = self._pipeline.start(make_config())
         device = profile.get_device()
         opened_serial = device.get_info(rs.camera_info.serial_number)
         requested = self.serial or "(first connected device)"
@@ -171,6 +257,11 @@ class D405VisionRingBuffer:
         if self.capture_depth:
             depth_sensor = profile.get_device().first_depth_sensor()
             self._depth_scale = float(depth_sensor.get_depth_scale())
+        try:
+            self.stream_info = _describe_profile(profile, opened_serial, self._depth_scale)
+        except Exception as exc:  # calibration metadata is best-effort
+            print(f"[D405VisionRingBuffer] could not read stream intrinsics: {exc}")
+            self.stream_info = {"serial": opened_serial, "depth_scale": self._depth_scale}
 
         self._stop.clear()
         self._thread = threading.Thread(
@@ -196,6 +287,12 @@ class D405VisionRingBuffer:
             try:
                 frames = self._pipeline.wait_for_frames(timeout_ms=500)
                 ts_s = time.time()
+                raw_sink = self._raw_frame_sink
+                if raw_sink is not None:
+                    try:
+                        raw_sink(_frameset_to_raw_dict(frames, ts_s, self.capture_color, self.capture_depth, self.capture_ir))
+                    except Exception:
+                        pass
 
                 if self.capture_color:
                     color_frame = frames.get_color_frame()
@@ -296,8 +393,12 @@ class ManipServerLayupEnv(ManipServerEnv):
         depth_clip: float = 0.5,
         vision_key: Optional[List[str]] = None,
         realsense_serial: Optional[str] = None,
+        record_d405_raw: bool = False,
     ) -> None:
         self._realsense_serial = realsense_serial
+        # Capture the IR pair + native depth for per-rollout raw recording
+        # (env_runners/d405_raw_recorder.py). Does not change the policy inputs.
+        self._record_d405_raw = bool(record_d405_raw)
         self.vision_key = vision_key or []
         self._use_rgb = "rgb_0" in self.vision_key
         self._use_depth = "depth_0" in self.vision_key
@@ -340,7 +441,8 @@ class ManipServerLayupEnv(ManipServerEnv):
                 policy_rgb_hw=policy_hw,
                 serial=self._realsense_serial,
                 capture_color=self._use_rgb,
-                capture_depth=self._use_depth,
+                capture_depth=self._use_depth or self._record_d405_raw,
+                capture_ir=self._record_d405_raw,
             )
             self._vision_buffer.start()
 
@@ -488,6 +590,17 @@ class ManipServerLayupEnv(ManipServerEnv):
         """Hook D405 raw RGB frames (HxWx3 RGB) for rollout video recording."""
         if self._vision_buffer is not None:
             self._vision_buffer._raw_rgb_sink = sink
+
+    def set_d405_raw_frame_sink(
+        self, sink: Optional[Callable[[Dict[str, Any]], Any]]
+    ) -> None:
+        """Hook full-res D405 framesets (IR pair, depth, color) for raw recording."""
+        if self._vision_buffer is not None:
+            self._vision_buffer._raw_frame_sink = sink
+
+    def get_d405_stream_info(self) -> Dict[str, Any]:
+        """Serial, depth scale, intrinsics, extrinsics of the open D405 pipeline."""
+        return dict(self._vision_buffer.stream_info) if self._vision_buffer is not None else {}
 
     def get_episode_folder(self) -> str:
         return self.server.get_episode_folder()
